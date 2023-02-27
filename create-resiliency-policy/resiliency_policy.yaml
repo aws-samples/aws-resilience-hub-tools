@@ -1,0 +1,47 @@
+Parameters:
+  PolicyName:
+    Type: String
+    Description: 'Enter a name for the policy.'
+  PolicyDescription:
+    Type: String
+    Description: 'A description for the resiliency policy.'
+  RPOInSecs:
+    Type: Number
+    Description: 'The Recovery Point Objective (RPO), in seconds.'
+  RTOInSecs:
+    Type: Number
+    Description: 'The Recovery Time Objective (RTO), in seconds.'
+  PolicyTier:
+    Type: String
+    Description: 'The tier for the policy based on criticality.'
+    AllowedValues:
+      - 'MissionCritical'
+      - 'Critical'
+      - 'Important'
+      - 'CoreServices'
+      - 'NonCritical'
+Resources:
+  ResiliencyPolicy:
+    Type: 'AWS::ResilienceHub::ResiliencyPolicy'
+    Properties:
+      Policy:
+        AZ:
+          RpoInSecs: !Ref RPOInSecs
+          RtoInSecs: !Ref RTOInSecs
+        Hardware:
+          RpoInSecs: !Ref RPOInSecs
+          RtoInSecs: !Ref RTOInSecs
+        Software:
+          RpoInSecs: !Ref RPOInSecs
+          RtoInSecs: !Ref RTOInSecs
+        Region:
+          RpoInSecs: !Ref RPOInSecs
+          RtoInSecs: !Ref RTOInSecs
+      PolicyName: !Ref PolicyName
+      PolicyDescription: !Ref PolicyDescription
+      Tier: !Ref PolicyTier
+
+Outputs:
+  PolicyARN:
+    Value: !Ref ResiliencyPolicy
+    

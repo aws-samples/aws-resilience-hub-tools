@@ -1,0 +1,253 @@
+Parameters:
+  QuickSightUserARN:
+    Type: String
+    Description: >-
+      ARN of the QuickSight user with who the dashboard will be shared.
+Resources:
+  ResilienceManifestUploader:
+    Type: 'AWS::CloudFormation::CustomResource'
+    Properties:
+      ServiceToken: !GetAtt 
+        - ResilienceManifestUploaderLambda
+        - Arn
+  ResilienceManifestUploaderLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        ZipFile: |
+          import boto3
+          import os
+          import json
+          import cfnresponse
+
+          def lambda_handler(event, context):
+              # Print incoming event
+              print('Incoming Event:' + json.dumps(event))
+              
+              try:
+                  if event['RequestType'] == 'Delete':
+                      print("delete")
+                  elif event['RequestType'] == 'Create':
+                      print("create")
+                      bucketName = os.environ['bucketName']
+                      manifest = str.encode('{\"fileLocations\": [{\"URIs\": [\"s3://' + bucketName + '/resilience-report.csv\"]}]}')
+                      s3 = boto3.resource('s3')
+                      object = s3.Object(bucketName, 'manifest.json')
+                      put_response = object.put(Body=manifest)
+                      print(put_response)
+                  elif event['RequestType'] == 'Update':
+                      print("update")
+                  responseValue = 'SUCCESS'
+              except Exception as e:
+                  print(e)
+                  responseValue = 'FAILURE'
+                  
+              responseData = {}
+              responseData['Data'] = responseValue
+              custom_resource_response = cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData, "manifest")
+      Environment:
+        Variables:
+          bucketName: !Sub 'resilience-reporter-${AWS::AccountId}'
+      FunctionName: ResilienceManifestUploader
+      Handler: index.lambda_handler
+      Role: !GetAtt 
+        - ResilienceManifestUploaderRole
+        - Arn
+      Runtime: python3.9
+      Timeout: '5'
+  ResilienceManifestUploaderRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: ResilienceManifestUploaderPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 's3:PutObject'
+                Resource:
+                  - !Sub 'arn:aws:s3:::resilience-reporter-${AWS::AccountId}'
+                  - !Sub 'arn:aws:s3:::resilience-reporter-${AWS::AccountId}/*'
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: '*'
+      RoleName: ResilienceManifestUploaderRole
+  ResilienceDataSource:
+    Type: 'AWS::QuickSight::DataSource'
+    DependsOn:
+      - ResilienceManifestUploader
+    Properties:
+      AwsAccountId: !Ref 'AWS::AccountId'
+      DataSourceId: ResilienceDataSource
+      DataSourceParameters:
+        S3Parameters:
+          ManifestFileLocation:
+            Bucket: !Sub 'resilience-reporter-${AWS::AccountId}'
+            Key: manifest.json
+      Name: ResilienceDataSource
+      Permissions:
+        - Principal: !Ref QuickSightUserARN
+          Actions:
+            - 'quicksight:UpdateDataSourcePermissions'
+            - 'quicksight:DescribeDataSource'
+            - 'quicksight:DescribeDataSourcePermissions'
+            - 'quicksight:PassDataSource'
+            - 'quicksight:UpdateDataSource'
+            - 'quicksight:DeleteDataSource'
+      Type: S3
+  ResilienceDataSet:
+    Type: 'AWS::QuickSight::DataSet'
+    Properties:
+      AwsAccountId: !Ref 'AWS::AccountId'
+      DataSetId: ResilienceDataSet
+      ImportMode: SPICE
+      Name: ResilienceDataSet
+      PhysicalTableMap:
+        ResilienceDataTable:
+          S3Source:
+            DataSourceArn: !GetAtt 
+              - ResilienceDataSource
+              - Arn
+            InputColumns:
+              - Name: Application Name
+                Type: STRING
+              - Name: Assessment Name
+                Type: STRING
+              - Name: Assessment Compliance Status
+                Type: STRING
+              - Name: End Time
+                Type: STRING
+              - Name: Overall RTO
+                Type: STRING
+              - Name: Overall RPO
+                Type: STRING
+              - Name: Target RTO
+                Type: STRING
+              - Name: Target RPO
+                Type: STRING
+              - Name: Application Compliance Status
+                Type: STRING
+              - Name: Resiliency Score
+                Type: STRING
+              - Name: Last Assessed
+                Type: STRING
+              - Name: Application Tier
+                Type: STRING
+              - Name: Region
+                Type: STRING
+            UploadSettings:
+              ContainsHeader: true
+              Delimiter: ','
+              Format: CSV
+      LogicalTableMap:
+        LogicalTable1:
+          Alias: Resilience-DataSet
+          DataTransforms:
+            - CastColumnTypeOperation:
+                ColumnName: Overall RTO
+                NewColumnType: INTEGER
+            - CastColumnTypeOperation:
+                ColumnName: Overall RPO
+                NewColumnType: INTEGER
+            - CastColumnTypeOperation:
+                ColumnName: Target RTO
+                NewColumnType: INTEGER
+            - CastColumnTypeOperation:
+                ColumnName: Target RPO
+                NewColumnType: INTEGER
+            - CastColumnTypeOperation:
+                ColumnName: Resiliency Score
+                NewColumnType: DECIMAL
+            - CreateColumnsOperation:
+                Columns:
+                  - ColumnId: Target RTO in minutes
+                    ColumnName: Target RTO in minutes
+                    Expression: '{Target RTO} / 60'
+            - CreateColumnsOperation:
+                Columns:
+                  - ColumnId: Target RPO in minutes
+                    ColumnName: Target RPO in minutes
+                    Expression: '{Target RPO} / 60'
+          Source:
+            PhysicalTableId: ResilienceDataTable
+      Permissions:
+        - Principal: !Ref QuickSightUserARN
+          Actions:
+            - 'quicksight:UpdateDataSetPermissions'
+            - 'quicksight:DescribeDataSet'
+            - 'quicksight:DescribeDataSetPermissions'
+            - 'quicksight:PassDataSet'
+            - 'quicksight:DescribeIngestion'
+            - 'quicksight:ListIngestions'
+            - 'quicksight:UpdateDataSet'
+            - 'quicksight:DeleteDataSet'
+            - 'quicksight:CreateIngestion'
+            - 'quicksight:CancelIngestion'
+  ResilienceAnalysis:
+    Type: 'AWS::QuickSight::Analysis'
+    Properties:
+      AnalysisId: Resilience-analysis
+      Name: Resilience-analysis
+      AwsAccountId: !Ref 'AWS::AccountId'
+      SourceEntity:
+        SourceTemplate:
+          Arn: >-
+            arn:aws:quicksight:us-east-1:061578351048:template/Resilience-analysis
+          DataSetReferences:
+            - DataSetPlaceholder: Resilience-dataset
+              DataSetArn: !GetAtt 
+                - ResilienceDataSet
+                - Arn
+      Permissions:
+        - Principal: !Ref QuickSightUserARN
+          Actions:
+            - 'quicksight:RestoreAnalysis'
+            - 'quicksight:UpdateAnalysisPermissions'
+            - 'quicksight:DeleteAnalysis'
+            - 'quicksight:DescribeAnalysisPermissions'
+            - 'quicksight:QueryAnalysis'
+            - 'quicksight:DescribeAnalysis'
+            - 'quicksight:UpdateAnalysis'
+  ResilienceDashboard:
+    Type: 'AWS::QuickSight::Dashboard'
+    Properties:
+      DashboardId: Resilience-dashboard
+      Name: Resilience-dashboard
+      AwsAccountId: !Ref 'AWS::AccountId'
+      SourceEntity:
+        SourceTemplate:
+          Arn: >-
+            arn:aws:quicksight:us-east-1:061578351048:template/Resilience-analysis
+          DataSetReferences:
+            - DataSetPlaceholder: Resilience-dataset
+              DataSetArn: !GetAtt 
+                - ResilienceDataSet
+                - Arn
+      Permissions:
+        - Principal: !Ref QuickSightUserARN
+          Actions:
+            - 'quicksight:DescribeDashboard'
+            - 'quicksight:ListDashboardVersions'
+            - 'quicksight:UpdateDashboardPermissions'
+            - 'quicksight:QueryDashboard'
+            - 'quicksight:UpdateDashboard'
+            - 'quicksight:DeleteDashboard'
+            - 'quicksight:DescribeDashboardPermissions'
+            - 'quicksight:UpdateDashboardPublishedVersion'
+Outputs:
+  DashboardURL:
+    Description: URL to access the Resilience dashboard
+    Value: !Sub 'https://${AWS::Region}.quicksight.aws.amazon.com/sn/dashboards/Resilience-dashboard'
+    

@@ -1,0 +1,96 @@
+Parameters:
+  PolicyName:
+    Type: String
+    Description: 'Enter a name for the policy.'
+  PolicyDescription:
+    Type: String
+    Description: 'A description for the resiliency policy.'
+  AvalabilityZoneRPOInSecs:
+    Type: Number
+    Description: 'The Recovery Point Objective (RPO) for Availability Zone disruptions, in seconds.'
+  AvalabilityZoneRTOInSecs:
+    Type: Number
+    Description: 'The Recovery Time Objective (RTO) for Availability Zone disruptions, in seconds.'
+  HardwareRPOInSecs:
+    Type: Number
+    Description: 'The Recovery Point Objective (RPO) for Hardware disruptions, in seconds.'
+  HardwareRTOInSecs:
+    Type: Number
+    Description: 'The Recovery Time Objective (RTO) for Hardware disruptions, in seconds.'
+  SoftwareRPOInSecs:
+    Type: Number
+    Description: 'The Recovery Point Objective (RPO) for Software disruptions, in seconds.'
+  SoftwareRTOInSecs:
+    Type: Number
+    Description: 'The Recovery Time Objective (RTO) for Software disruptions, in seconds.'
+  RegionRPOInSecs:
+    Type: Number
+    Description: 'The Recovery Point Objective (RPO) for Regional disruptions, in seconds.'
+  RegionRTOInSecs:
+    Type: Number
+    Description: 'The Recovery Time Objective (RTO) for Regional disruptions, in seconds.'
+  PolicyTier:
+    Type: String
+    Description: 'The tier for the policy based on criticality.'
+    AllowedValues:
+      - 'MissionCritical'
+      - 'Critical'
+      - 'Important'
+      - 'CoreServices'
+      - 'NonCritical'
+
+Metadata: 
+  AWS::CloudFormation::Interface: 
+    ParameterGroups: 
+      - 
+        Label: 
+          default: "Policy metadata"
+        Parameters: 
+          - PolicyName
+          - PolicyDescription
+          - PolicyTier
+      - 
+        Label: 
+          default: "Target RPO"
+        Parameters: 
+          - SoftwareRPOInSecs
+          - HardwareRPOInSecs
+          - AvalabilityZoneRPOInSecs
+          - RegionRPOInSecs
+      -
+        Label: 
+          default: "Target RTO"
+        Parameters: 
+          - SoftwareRTOInSecs
+          - HardwareRTOInSecs
+          - AvalabilityZoneRTOInSecs
+          - RegionRTOInSecs
+    ParameterLabels: 
+      VPCID: 
+        default: "Which VPC should this be deployed to?"
+
+Resources:
+  ResiliencyPolicy:
+    Type: 'AWS::ResilienceHub::ResiliencyPolicy'
+    Properties:
+      Policy:
+        AZ:
+          RpoInSecs: !Ref AvalabilityZoneRPOInSecs
+          RtoInSecs: !Ref AvalabilityZoneRTOInSecs
+        Hardware:
+          RpoInSecs: !Ref HardwareRPOInSecs
+          RtoInSecs: !Ref HardwareRTOInSecs
+        Software:
+          RpoInSecs: !Ref SoftwareRPOInSecs
+          RtoInSecs: !Ref SoftwareRTOInSecs
+        Region:
+          RpoInSecs: !Ref RegionRPOInSecs
+          RtoInSecs: !Ref RegionRTOInSecs
+      PolicyName: !Ref PolicyName
+      PolicyDescription: !Ref PolicyDescription
+      Tier: !Ref PolicyTier
+
+Outputs:
+  PolicyARN:
+    Value: !Ref ResiliencyPolicy
+    

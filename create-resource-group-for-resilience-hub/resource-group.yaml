@@ -1,0 +1,58 @@
+Parameters:
+  ApplicationName:
+    Type: String
+    Description: >-
+      The name of the application. This value will be used to name the resource
+      group.
+  TagKey:
+    Type: String
+    Description: The tag key for resources in your application.
+  TagValue:
+    Type: String
+    Description: The tag value for resources in your application
+Resources:
+  ARHResourceGroup:
+    Type: 'AWS::ResourceGroups::Group'
+    Properties:
+      Description: >-
+        Resource group that defines an application to be assessed by Resiliennce
+        Hub
+      Name: !Join 
+        - ''
+        - - !Ref ApplicationName
+          - '-resilience-assessment'
+      ResourceQuery:
+        Query:
+          ResourceTypeFilters:
+            - 'AWS::ApiGateway::RestApi'
+            - 'AWS::DynamoDB::Table'
+            - 'AWS::EC2::Instance'
+            - 'AWS::EC2::NatGateway'
+            - 'AWS::EC2::Volume'
+            - 'AWS::ECS::Service'
+            - 'AWS::EFS::FileSystem'
+            - 'AWS::Lambda::Function'
+            - 'AWS::RDS::DBCluster'
+            - 'AWS::RDS::DBInstance'
+            - 'AWS::S3::Bucket'
+            - 'AWS::SQS::Queue'
+            - 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+            - 'AWS::ElasticLoadBalancing::LoadBalancer'
+          TagFilters:
+            - Key: !Ref TagKey
+              Values:
+                - !Ref TagValue
+        Type: TAG_FILTERS_1_0
+Outputs:
+  ResourceGroupName:
+    Description: >-
+      The name of the resource group that can be used for defining applications
+      in Resilience Hub.
+    Value: !Ref ARHResourceGroup
+  ResourceGroupARN:
+    Description: >-
+      The ARN of the resource group that can be used for defining applications
+      in Resilience Hub.
+    Value: !GetAtt 
+      - ARHResourceGroup
+      - Arn

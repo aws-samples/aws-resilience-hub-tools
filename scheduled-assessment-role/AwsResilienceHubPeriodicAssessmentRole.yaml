@@ -1,0 +1,181 @@
+Resources:
+  ScheduledAssessmentRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: resiliencehub.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Description: Role used by AWS Resilience Hub to run periodic assessments
+      Policies:
+        - PolicyName: AwsResilienceHubPeriodicAssessmentPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'resiliencehub:*'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'sns:GetTopicAttributes'
+                  - 'sns:ListSubscriptionsByTopic'
+                  - 'sns:GetSubscriptionAttributes'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'cloudformation:DescribeStacks'
+                  - 'cloudformation:ListStackResources'
+                  - 'cloudformation:ValidateTemplate'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'servicecatalog:GetApplication'
+                  - 'servicecatalog:ListAssociatedResources'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'resource-groups:ListGroupResources'
+                  - 'resource-groups:GetGroup'
+                  - 'tag:GetResources'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'cloudwatch:DescribeAlarms'
+                  - 'cloudwatch:GetMetricData'
+                  - 'cloudwatch:GetMetricStatistics'
+                  - 'cloudwatch:PutMetricData'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'fis:GetExperimentTemplate'
+                  - 'fis:ListExperimentTemplates'
+                  - 'fis:ListExperiments'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'ssm:GetParametersByPath'
+                Resource: 'arn:aws:ssm:*::parameter/ResilienceHub/*'
+              - Effect: Allow
+                Action:
+                  - 's3:GetBucketPolicyStatus'
+                  - 's3:PutBucketVersioning'
+                  - 's3:GetBucketTagging'
+                  - 's3:GetBucketVersioning'
+                  - 's3:GetReplicationConfiguration'
+                  - 's3:ListBucket'
+                  - 's3:ListAllMyBuckets'
+                  - 's3:GetBucketLocation'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 's3:CreateBucket'
+                  - 's3:PutObject'
+                  - 's3:GetObject'
+                Resource: 'arn:aws:s3:::aws-resilience-hub-artifacts-*'
+              - Effect: Allow
+                Action:
+                  - 'autoscaling:DescribeAutoScalingGroups'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'ec2:DescribeAvailabilityZones'
+                  - 'ec2:DescribeVpcEndpoints'
+                  - 'ec2:DescribeFastSnapshotRestores'
+                  - 'ec2:DescribeInstances'
+                  - 'ec2:DescribeSnapshots'
+                  - 'ec2:DescribeVolumes'
+                  - 'ec2:DescribeNatGateways'
+                  - 'ec2:DescribeSubnets'
+                  - 'ec2:DescribeRegions'
+                  - 'ec2:DescribeTags'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'rds:DescribeDBClusters'
+                  - 'rds:DescribeDBInstanceAutomatedBackups'
+                  - 'rds:DescribeDBInstances'
+                  - 'rds:DescribeGlobalClusters'
+                  - 'rds:DescribeDBClusterSnapshots'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'elasticloadbalancing:DescribeTargetGroups'
+                  - 'elasticloadbalancing:DescribeLoadBalancers'
+                  - 'elasticloadbalancing:DescribeTargetHealth'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'lambda:GetFunction'
+                  - 'lambda:GetFunctionConcurrency'
+                  - 'lambda:ListAliases'
+                  - 'lambda:ListVersionsByFunction'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'ecr:DescribeRegistry'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'backup:DescribeBackupVault'
+                  - 'backup:GetBackupPlan'
+                  - 'backup:GetBackupSelection'
+                  - 'backup:ListBackupPlans'
+                  - 'backup:ListBackupSelections'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:ListTagsOfResource'
+                  - 'dynamodb:DescribeTable'
+                  - 'dynamodb:DescribeGlobalTable'
+                  - 'dynamodb:ListGlobalTables'
+                  - 'dynamodb:DescribeContinuousBackups'
+                  - 'dynamodb:DescribeLimits'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'elasticfilesystem:DescribeMountTargets'
+                  - 'elasticfilesystem:DescribeFileSystems'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'sqs:GetQueueUrl'
+                  - 'sqs:GetQueueAttributes'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'apigateway:GET'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'ecs:DescribeClusters'
+                  - 'ecs:ListServices'
+                  - 'ecs:DescribeServices'
+                  - 'ecs:DescribeCapacityProviders'
+                  - 'ecs:DescribeContainerInstances'
+                  - 'ecs:ListContainerInstances'
+                  - 'ecs:DescribeTaskDefinition'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'route53-recovery-control-config:ListControlPanels'
+                  - 'route53-recovery-control-config:ListRoutingControls'
+                  - 'route53-recovery-readiness:ListReadinessChecks'
+                  - 'route53-recovery-readiness:GetResourceSet'
+                  - 'route53-recovery-readiness:GetReadinessCheckStatus'
+                  - 'route53-recovery-control-config:ListClusters'
+                  - 'route53:ListHealthChecks'
+                  - 'route53:ListHostedZones'
+                  - 'route53:ListResourceRecordSets'
+                  - 'route53:GetHealthCheck'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'drs:DescribeSourceServers'
+                  - 'drs:DescribeJobs'
+                  - 'drs:GetReplicationConfiguration'
+                Resource: '*'
+      RoleName: AwsResilienceHubPeriodicAssessmentRole
