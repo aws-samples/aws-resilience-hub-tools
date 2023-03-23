@@ -19,7 +19,7 @@ This solution creates a new Resource Group and applies appropriate filters to on
 * AWS::ElasticLoadBalancingV2::LoadBalancer
 * AWS::ElasticLoadBalancing::LoadBalancer
 
-**NOTE: There are additional resource types supported by Resilience Hub (such as Amazon EC2 AutoScaling groups) that are currently not supported by Resource Groups. Use the [resource-group-enhancer](resource-group-enhancer/README.md) solution to add these unsupported resource types to the application on Resilience Hub.**
+**NOTE: There are additional resource types supported by Resilience Hub (such as Amazon EC2 AutoScaling groups) that are currently not supported by Resource Groups. Use the [resource-group-enhancer](/resource-group-enhancer/README.md) solution to add these unsupported resource types to the application on Resilience Hub.**
 
 ## Deployment
 
