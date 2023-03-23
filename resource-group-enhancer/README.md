@@ -2,10 +2,10 @@
 
 There are 4 resource types that are supported by AWS Resilience Hub but not supported by AWS Resource Groups. If you are using Resource Groups as the input for applications on Resilience Hub, and your application consists of one of the following resource types, you can use this solution to add these resource types directly to the application on Resilience Hub in an automated way.
 
-AWS::AutoScaling::AutoScalingGroup
-AWS::ApiGatewayV2::Api
-AWS::RDS::GlobalCluster
-AAWS::Route53::RecordSet
+* AWS::AutoScaling::AutoScalingGroup
+* AWS::ApiGatewayV2::Api
+* AWS::RDS::GlobalCluster
+* AWS::Route53::RecordSet
 
 ## Pre-requisites
 
