@@ -6,6 +6,10 @@ pipeline {
     STACK_ARN="##CloudFormation Stack ARN##"
   }
   stages {
+    /*
+     * Peform CloudFormation deployment and any other prerequisites as a part of your infrastucture pipeline first.
+     * And then add the 'Assesment' stage below.
+     */
     stage('Assesment') {
       steps {
         withCredentials([aws(accessKeyVariable: 'AWS_ACCESS_KEY_ID', credentialsId: '##CREDENTIAL_ID##', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY')]) {
