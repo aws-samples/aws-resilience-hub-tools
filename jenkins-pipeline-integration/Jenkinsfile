@@ -1,0 +1,101 @@
+pipeline {
+  agent { label "main" }
+  environment {
+    AWS_DEFAULT_REGION="##your AWS region##"
+    APP_ARN="#Resilienve Hub Application ARN##"
+    STACK_ARN="##CloudFormation Stack ARN##"
+  }
+  stages {
+    stage('Assesment') {
+      steps {
+        withCredentials([aws(accessKeyVariable: 'AWS_ACCESS_KEY_ID', credentialsId: '##CREDENTIAL_ID##', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+          script {
+              //import resources to Resilience Hub application draft version 
+              importDetails = sh ( 
+                script: '''
+                  aws resiliencehub import-resources-to-draft-app-version --app-arn ${APP_ARN}  --source-arns ${STACK_ARN}
+                    ''',
+                returnStdout: true
+                )
+              
+              //Wait for import to complete
+              importStatus = sh ( 
+                script: '''
+                  aws resiliencehub describe-draft-app-version-resources-import-status --app-arn ${APP_ARN}
+                    ''',
+                returnStdout: true
+                )
+                def importObj = readJSON text: importStatus
+                echo "Waiting for the import to complete: current status - ${importObj['status']}"
+                
+              while (importObj['status'] in ['Pending','InProgress']){
+                  sleep(5)
+                  importStatus = sh ( 
+                    script: '''
+                            aws resiliencehub describe-draft-app-version-resources-import-status --app-arn ${APP_ARN}
+                        ''',
+                    returnStdout: true
+                )
+                importObj = readJSON text: importStatus
+              }
+              
+              if(importObj['status'] == 'Failed'){
+                currentBuild.result = "FAILURE"
+                throw new Exception("Resources import failed -${importObj['status']}")  
+              }
+              
+              //Publish a new app version
+              publishApp = sh ( 
+                script: '''
+                  aws resiliencehub publish-app-version --app-arn ${APP_ARN}
+                    ''',
+                returnStdout: true
+                )
+            
+                
+              //start the app assesment
+              assesmentResults = sh ( 
+                script: '''
+                  aws resiliencehub start-app-assessment --app-arn ${APP_ARN}  --app-version release --assessment-name jenkins-pipeline-assesment
+                    ''',
+                returnStdout: true
+                )
+              def assesmentObj = readJSON text: assesmentResults
+              def assesmentDetails = assesmentObj['assessment']
+              env.assesmentArn = assesmentDetails['assessmentArn']
+              def assesmentStatus = assesmentDetails['assessmentStatus']
+              
+              // Wait until the assesment is complete
+              echo "Waiting for the assesment to complete: current status - ${assesmentStatus}"
+              while (assesmentStatus in ['Pending','InProgress']){
+                  sleep(5)
+                  assesmentResults = sh ( 
+                    script: '''
+                            aws resiliencehub describe-app-assessment --assessment-arn ${assesmentArn}
+                        ''',
+                    returnStdout: true
+                )
+                assesmentObj = readJSON text: assesmentResults
+                assesmentDetails = assesmentObj['assessment']
+                assesmentStatus = assesmentDetails['assessmentStatus']
+              }
+              echo "Assesment completed status: ${assesmentStatus}"
+              
+              //Fail the build if the assesment status is failed
+              if (assesmentStatus ==  'Failed'){
+                  currentBuild.result = "FAILURE"
+                  throw new Exception("Assessment failed -${assesmentStatus}")
+              }
+             //Fail the build if the compliance status is breached
+              if (assesmentDetails['complianceStatus'] ==  'PolicyBreached'){
+                  currentBuild.result = "FAILURE"
+                  throw new Exception("Resiliency policy breached")
+              }
+              else
+                echo "Resiliency policy met"
+          }
+        }
+      }
+    }
+  }
+}
