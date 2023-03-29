@@ -30,7 +30,7 @@ Achieve continual resilience by integrating resilience checks into your Continuo
 5.	Specify an ID and then add the credentials obtained in Step A. Save the credential ID. You will use this in the pipeline script.
 
 ## Deployment
-Update your pipeline scripts as per the example provided in [Jenkinsfile](./Jenkinsfile). Specifically, add the  **assesment** stage into the script for your pipelines. Ensure that you have updated the following placeholders:
+Update your pipeline scripts as per the example provided in [Jenkinsfile](./Jenkinsfile). Specifically, add the  **assessment** stage into the script for your pipelines. Ensure that you have updated the following placeholders:
   * **AWS_DEFAULT_REGION** - specify the AWS Region where the application exists on Resilience Hub 
   * **STACK_ARN** - specify the ARN of the AWS CloudFormation stack that you are updating as a part of your deployment
   * **APP_ARN** - specify the ARN of the application you have defined within Resilience Hub

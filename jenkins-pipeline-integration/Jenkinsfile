@@ -7,10 +7,10 @@ pipeline {
   }
   stages {
     /*
-     * Peform CloudFormation deployment and any other prerequisites as a part of your infrastucture pipeline first.
-     * And then add the 'Assesment' stage below.
+     * Perform CloudFormation deployment and any other prerequisites as a part of your Infrastucture Pipeline first.
+     * And then add the 'Assessment' stage below.
      */
-    stage('Assesment') {
+    stage('Assessment') {
       steps {
         withCredentials([aws(accessKeyVariable: 'AWS_ACCESS_KEY_ID', credentialsId: '##CREDENTIAL_ID##', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY')]) {
           script {
@@ -57,41 +57,41 @@ pipeline {
                 )
             
                 
-              //start the app assesment
-              assesmentResults = sh ( 
+              //start the app assessment
+              assessmentResults = sh ( 
                 script: '''
-                  aws resiliencehub start-app-assessment --app-arn ${APP_ARN}  --app-version release --assessment-name jenkins-pipeline-assesment
+                  aws resiliencehub start-app-assessment --app-arn ${APP_ARN}  --app-version release --assessment-name jenkins-pipeline-assessment
                     ''',
                 returnStdout: true
                 )
-              def assesmentObj = readJSON text: assesmentResults
-              def assesmentDetails = assesmentObj['assessment']
-              env.assesmentArn = assesmentDetails['assessmentArn']
-              def assesmentStatus = assesmentDetails['assessmentStatus']
+              def assessmentObj = readJSON text: assessmentResults
+              def assessmentDetails = assessmentObj['assessment']
+              env.assessmentArn = assessmentDetails['assessmentArn']
+              def assessmentStatus = assessmentDetails['assessmentStatus']
               
-              // Wait until the assesment is complete
-              echo "Waiting for the assesment to complete: current status - ${assesmentStatus}"
-              while (assesmentStatus in ['Pending','InProgress']){
+              // Wait until the assessment is complete
+              echo "Waiting for the assessment to complete: current status - ${assessmentStatus}"
+              while (assessmentStatus in ['Pending','InProgress']){
                   sleep(5)
-                  assesmentResults = sh ( 
+                  assessmentResults = sh ( 
                     script: '''
-                            aws resiliencehub describe-app-assessment --assessment-arn ${assesmentArn}
+                            aws resiliencehub describe-app-assessment --assessment-arn ${assessmentArn}
                         ''',
                     returnStdout: true
                 )
-                assesmentObj = readJSON text: assesmentResults
-                assesmentDetails = assesmentObj['assessment']
-                assesmentStatus = assesmentDetails['assessmentStatus']
+                assessmentObj = readJSON text: assessmentResults
+                assessmentDetails = assessmentObj['assessment']
+                assessmentStatus = assessmentDetails['assessmentStatus']
               }
-              echo "Assesment completed status: ${assesmentStatus}"
+              echo "assessment completed status: ${assessmentStatus}"
               
-              //Fail the build if the assesment status is failed
-              if (assesmentStatus ==  'Failed'){
+              //Fail the build if the assessment status is failed
+              if (assessmentStatus ==  'Failed'){
                   currentBuild.result = "FAILURE"
-                  throw new Exception("Assessment failed -${assesmentStatus}")
+                  throw new Exception("Assessment failed -${assessmentStatus}")
               }
              //Fail the build if the compliance status is breached
-              if (assesmentDetails['complianceStatus'] ==  'PolicyBreached'){
+              if (assessmentDetails['complianceStatus'] ==  'PolicyBreached'){
                   currentBuild.result = "FAILURE"
                   throw new Exception("Resiliency policy breached")
               }
