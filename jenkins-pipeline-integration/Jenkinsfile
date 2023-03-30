@@ -1,0 +1,105 @@
+pipeline {
+  agent { label "main" }
+  environment {
+    AWS_DEFAULT_REGION="##your AWS region##"
+    APP_ARN="#Resilienve Hub Application ARN##"
+    STACK_ARN="##CloudFormation Stack ARN##"
+  }
+  stages {
+    /*
+     * Perform CloudFormation deployment and any other prerequisites as a part of your Infrastucture Pipeline first.
+     * And then add the 'Assessment' stage below.
+     */
+    stage('Assessment') {
+      steps {
+        withCredentials([aws(accessKeyVariable: 'AWS_ACCESS_KEY_ID', credentialsId: '##CREDENTIAL_ID##', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+          script {
+              //import resources to Resilience Hub application draft version 
+              importDetails = sh ( 
+                script: '''
+                  aws resiliencehub import-resources-to-draft-app-version --app-arn ${APP_ARN}  --source-arns ${STACK_ARN}
+                    ''',
+                returnStdout: true
+                )
+              
+              //Wait for import to complete
+              importStatus = sh ( 
+                script: '''
+                  aws resiliencehub describe-draft-app-version-resources-import-status --app-arn ${APP_ARN}
+                    ''',
+                returnStdout: true
+                )
+                def importObj = readJSON text: importStatus
+                echo "Waiting for the import to complete: current status - ${importObj['status']}"
+                
+              while (importObj['status'] in ['Pending','InProgress']){
+                  sleep(5)
+                  importStatus = sh ( 
+                    script: '''
+                            aws resiliencehub describe-draft-app-version-resources-import-status --app-arn ${APP_ARN}
+                        ''',
+                    returnStdout: true
+                )
+                importObj = readJSON text: importStatus
+              }
+              
+              if(importObj['status'] == 'Failed'){
+                currentBuild.result = "FAILURE"
+                throw new Exception("Resources import failed -${importObj['status']}")  
+              }
+              
+              //Publish a new app version
+              publishApp = sh ( 
+                script: '''
+                  aws resiliencehub publish-app-version --app-arn ${APP_ARN}
+                    ''',
+                returnStdout: true
+                )
+            
+                
+              //start the app assessment
+              assessmentResults = sh ( 
+                script: '''
+                  aws resiliencehub start-app-assessment --app-arn ${APP_ARN}  --app-version release --assessment-name jenkins-pipeline-assessment
+                    ''',
+                returnStdout: true
+                )
+              def assessmentObj = readJSON text: assessmentResults
+              def assessmentDetails = assessmentObj['assessment']
+              env.assessmentArn = assessmentDetails['assessmentArn']
+              def assessmentStatus = assessmentDetails['assessmentStatus']
+              
+              // Wait until the assessment is complete
+              echo "Waiting for the assessment to complete: current status - ${assessmentStatus}"
+              while (assessmentStatus in ['Pending','InProgress']){
+                  sleep(5)
+                  assessmentResults = sh ( 
+                    script: '''
+                            aws resiliencehub describe-app-assessment --assessment-arn ${assessmentArn}
+                        ''',
+                    returnStdout: true
+                )
+                assessmentObj = readJSON text: assessmentResults
+                assessmentDetails = assessmentObj['assessment']
+                assessmentStatus = assessmentDetails['assessmentStatus']
+              }
+              echo "assessment completed status: ${assessmentStatus}"
+              
+              //Fail the build if the assessment status is failed
+              if (assessmentStatus ==  'Failed'){
+                  currentBuild.result = "FAILURE"
+                  throw new Exception("Assessment failed -${assessmentStatus}")
+              }
+             //Fail the build if the compliance status is breached
+              if (assessmentDetails['complianceStatus'] ==  'PolicyBreached'){
+                  currentBuild.result = "FAILURE"
+                  throw new Exception("Resiliency policy breached")
+              }
+              else
+                echo "Resiliency policy met"
+          }
+        }
+      }
+    }
+  }
+}
