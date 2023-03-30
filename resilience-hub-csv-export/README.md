@@ -27,3 +27,5 @@ The script will generate a CSV file that contains details of all assessments for
 * **Last Assessed** - timestamp of the most recent assessment
 * **Application Tier** - application tier as defined by the resiliency policy associated with the application
 * **Region** - the AWS Region where the application is defined in Resilience Hub
+
+You can see a sample report here - [sample-resilience-report.csv](./sample-resilience-report.csv)

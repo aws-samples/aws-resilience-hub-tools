@@ -87,6 +87,8 @@ The solution is provided as CloudFormation templates that can be used to create 
 
 After the CloudFormation stack reaches **CREATE_COMPLETE**, navigate to the **Outputs** tab of the stack deployed in **Stage 3** of the deployment to find the URL for the dashboard.
 
+You can see a sample report here - [sample-resilience-report.csv](./sample-resilience-report.csv)
+
 ## Configure data refresh
 
 To ensure data in the dashboard is being refreshed, you will need to [configure a data refresh schedule](https://docs.aws.amazon.com/quicksight/latest/user/refreshing-imported-data.html#schedule-data-refresh) for the **ResilienceDataSet**. 
