@@ -1,6 +1,6 @@
 # Resilience reporting dashboard
 
-Create a reporting dashboard on [Amazon QuickSight](https://aws.amazon.com/quicksight/) for applications defined and assessed using AWS Resilience Hub. A resilience dashboard provides a central place that leadership and other stakeholders can visit to get information regarding your organization's mission critical applications. For example, if the compliance team needs to report on certain applications' resilience each month, this dashboard would allow them to self-service that information.
+Create a reporting dashboard on [Amazon QuickSight](https://aws.amazon.com/quicksight/) for applications defined and assessed using AWS Resilience Hub. A resilience dashboard provides a central place that leadership and other stakeholders can visit to get information regarding your organization's mission critical applications. For example, if the compliance team needs to report on certain applications' resilience each month, this dashboard would allow them to self-service that information. For more information on this solution, check out this blog post - [Build a resilience reporting dashboard with AWS Resilience Hub and Amazon QuickSight](https://aws.amazon.com/blogs/mt/resilience-reporting-dashboard-aws-resilience-hub/).
 
 ## Architecture
 
