@@ -1,0 +1,177 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: A sample template for a Step Functions state machine that could integrate automatic AWS Resilience Hub application assessment as part of a CodePipeline execution
+Resources:
+  AppAssessmentRole:
+    Type: AWS::IAM::Role
+    Properties: 
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - states.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Description: String
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/ReadOnlyAccess
+      Policies: 
+        - PolicyName: ResilienceHubPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - 'resiliencehub:ImportResourcesToDraftAppVersion'
+                  - 'resiliencehub:PublishAppVersion'
+                  - 'resiliencehub:DescribeDraftAppVersionResourcesImportStatus'
+                  - 'resiliencehub:DescribeApp'
+                  - 'resiliencehub:DescribeAppAssessment'
+                  - 'resiliencehub:StartAppAssessment'
+                Resource: '*'
+        - PolicyName: SNSPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - 'SNS:Publish'
+                Resource: !Ref AssessmentSNSTopic
+  AssessmentSNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      KmsMasterKeyId: "alias/aws/sns"
+  AppAssessmentSFN:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: AppAssessement
+      DefinitionSubstitutions:
+        sns_arn: !Ref AssessmentSNSTopic
+      DefinitionString: |-
+        {
+          "Comment": "A description of my state machine",
+          "StartAt": "ImportResourcesToDraftAppVersion",
+          "States": {
+            "ImportResourcesToDraftAppVersion": {
+              "Type": "Task",
+              "Next": "WaitForImportCompletion",
+              "Parameters": {
+                "AppArn.$": "$.AppArn",
+                "SourceArns.$": "States.Array($.StackArn)"
+              },
+              "Resource": "arn:aws:states:::aws-sdk:resiliencehub:importResourcesToDraftAppVersion"
+            },
+            "WaitForImportCompletion": {
+              "Type": "Wait",
+              "Seconds": 5,
+              "Next": "DescribeDraftAppVersionResourcesImportStatus"
+            },
+            "DescribeDraftAppVersionResourcesImportStatus": {
+              "Type": "Task",
+              "Next": "CheckResourceResoluionStatus",
+              "Parameters": {
+                "AppArn.$": "$.AppArn"
+              },
+              "Resource": "arn:aws:states:::aws-sdk:resiliencehub:describeDraftAppVersionResourcesImportStatus"
+            },
+            "CheckResourceResoluionStatus": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.Status",
+                  "StringEquals": "Success",
+                  "Next": "PublishAppVersion"
+                },
+                {
+                  "Variable": "$.Status",
+                  "StringEquals": "Failed",
+                  "Next": "SNS Publish"
+                }
+              ],
+              "Default": "WaitForImportCompletion"
+            },
+            "PublishAppVersion": {
+              "Type": "Task",
+              "Next": "StartAppAssessment",
+              "Parameters": {
+                "AppArn.$": "$.AppArn"
+              },
+              "Resource": "arn:aws:states:::aws-sdk:resiliencehub:publishAppVersion",
+              "ResultPath": null
+            },
+            "StartAppAssessment": {
+              "Type": "Task",
+              "Next": "WaitForAssessmentCompletion",
+              "Parameters": {
+                "AppArn.$": "$.AppArn",
+                "AppVersion": "release",
+                "AssessmentName": "Codepipeline-Assessment"
+              },
+              "Resource": "arn:aws:states:::aws-sdk:resiliencehub:startAppAssessment"
+            },
+            "WaitForAssessmentCompletion": {
+              "Type": "Wait",
+              "Seconds": 5,
+              "Next": "DescribeAppAssessment"
+            },
+            "DescribeAppAssessment": {
+              "Type": "Task",
+              "Parameters": {
+                "AssessmentArn.$": "$.Assessment.AssessmentArn"
+              },
+              "Resource": "arn:aws:states:::aws-sdk:resiliencehub:describeAppAssessment",
+              "Next": "CheckAppAssessmentStatus"
+            },
+            "CheckAppAssessmentStatus": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Or": [
+                    {
+                      "Variable": "$.Assessment.AssessmentStatus",
+                      "StringEquals": "InProgress"
+                    },
+                    {
+                      "Variable": "$.Assessment.AssessmentStatus",
+                      "StringEquals": "Pending"
+                    }
+                  ],
+                  "Next": "WaitForAssessmentCompletion"
+                },
+                {
+                  "And": [
+                    {
+                      "Variable": "$.Assessment.AssessmentStatus",
+                      "StringEquals": "Success"
+                    },
+                    {
+                      "Variable": "$.Assessment.ComplianceStatus",
+                      "StringEquals": "PolicyMet"
+                    }
+                  ],
+                  "Next": "Success"
+                }
+              ],
+              "Default": "SNS Publish"
+            },
+            "SNS Publish": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::sns:publish",
+              "Parameters": {
+                "Message.$": "$",
+                "TopicArn": "${sns_arn}"
+              },
+              "Next": "Fail"
+            },
+            "Success": {
+              "Type": "Succeed"
+            },
+            "Fail": {
+              "Type": "Fail",
+              "Error": "",
+              "Cause": ""
+            }
+          }
+        }
+      RoleArn: !GetAtt AppAssessmentRole.Arn
