@@ -1,0 +1,30 @@
+name: Email notifications
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+  issue_comment:
+    types: [created, edited, deleted]
+
+jobs:
+  sendEmail:
+    if: ${{ github.event.issue.pull_request }}  # This line ensures the action runs only for PR comments
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+
+    - name: Send mail
+      uses: dawidd6/action-send-mail@v2
+      with:
+        server_address: email-smtp.us-west-2.amazonaws.com
+        server_port: 587
+        username: ${{ secrets.AWS_SES_SMTP_USERNAME }}
+        password: ${{ secrets.AWS_SES_SMTP_PASSWORD }}
+        subject: New Activity in ${{ github.repository }}
+        to: aws-draas-team+github@amazon.com
+        from: aws-draas-team+github@amazon.com
+        body: |
+          New activity on a pull request. 
+          ${{ github.event.issue.html_url }}
