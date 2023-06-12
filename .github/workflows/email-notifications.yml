@@ -8,9 +8,7 @@ on:
 
 jobs:
   sendEmail:
-    if: ${{ github.event.issue.pull_request }}  # This line ensures the action runs only for PR comments
     runs-on: ubuntu-latest
-
     steps:
     - name: Checkout
       uses: actions/checkout@v2
@@ -27,4 +25,4 @@ jobs:
         from: "AWS Resilience Hub GitHub Notifications <aws-draas-team+github@amazon.com>"
         body: |
           New activity on a pull request. 
-          ${{ github.event.issue.html_url }}
+          ${{ github.event.pull_request.html_url }}
