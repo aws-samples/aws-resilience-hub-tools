@@ -95,13 +95,17 @@ for region in regions:
                         target_rto = seconds_to_time(latest_assessment['policy']['policy'][dtype]['rtoInSecs'])
                         current_rpo = seconds_to_time(latest_assessment['compliance'][dtype]['currentRpoInSecs'])
                         target_rpo = seconds_to_time(latest_assessment['policy']['policy'][dtype]['rpoInSecs'])
+                        rto_description = latest_assessment['compliance'][dtype]['rtoDescription']
+                        rpo_description = latest_assessment['compliance'][dtype]['rpoDescription']
 
                         rto_color = green if latest_assessment['compliance'][dtype]['currentRtoInSecs'] <= latest_assessment['policy']['policy'][dtype]['rtoInSecs'] else red
                         rpo_color = green if latest_assessment['compliance'][dtype]['currentRpoInSecs'] <= latest_assessment['policy']['policy'][dtype]['rpoInSecs'] else red
 
                         flowables.append(Paragraph(f"<b>{dtype} Disruption Type:</b>", style))
                         flowables.append(Paragraph(f"<b> <font color='{rto_color}'>Current RTO:</font> </b> {current_rto} <b>Target RTO:</b> {target_rto}", style))
+                        flowables.append(Paragraph(f"<b> Description: </b> {rto_description}", style))
                         flowables.append(Paragraph(f"<b> <font color='{rpo_color}'>Current RPO:</font> </b> {current_rpo} <b>Target RPO:</b> {target_rpo}", style))
+                        flowables.append(Paragraph(f"<b> Description: </b> {rpo_description}", style))
                         flowables.append(Spacer(1, 12))
 
 doc.build(flowables)
