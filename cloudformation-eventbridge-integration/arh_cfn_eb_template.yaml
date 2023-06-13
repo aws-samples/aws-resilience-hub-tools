@@ -1,0 +1,555 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Resources:
+  CustomEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub ${AWS::StackName}-cloudFormationEventBus
+
+  EventBridgeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - events.amazonaws.com
+              Action: 
+                - "sts:AssumeRole"
+      Policies:
+        - PolicyName: AllowCloudwatchPutEvents
+          PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action: 
+                    - "events:PutEvents"
+                  Resource:
+                    - !GetAtt CustomEventBus.Arn
+
+  EventBridgeToStepFunctionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - events.amazonaws.com
+              Action: 
+                - "sts:AssumeRole"
+      Policies:
+        - PolicyName: AllowStartStateMachine
+          PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action: 
+                    - "states:StartExecution"
+                  Resource:
+                    - !GetAtt ArhCfnStateMachine.Arn
+
+  CFStateChangeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName: !Ref CustomEventBus
+      EventPattern:
+        source:
+          - aws.cloudformation
+        detail-type:
+          - CloudFormation Stack Status Change
+        detail:
+          status-details:
+            status:
+              - CREATE_COMPLETE
+              - UPDATE_COMPLETE
+              - DELETE_COMPLETE
+      State: ENABLED
+      Targets:
+        - Id: 0
+          Arn: !GetAtt ArhCfnStateMachine.Arn
+          RoleArn: !GetAtt EventBridgeToStepFunctionsRole.Arn
+
+  SendToCFBusRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName: default
+      EventPattern:
+        source:
+          - aws.cloudformation
+        detail-type:
+          - CloudFormation Stack Status Change
+        detail:
+          status-details:
+            status:
+              - CREATE_COMPLETE
+              - UPDATE_COMPLETE
+              - DELETE_COMPLETE
+      State: ENABLED
+      Targets:
+        - Id: 0
+          Arn: !GetAtt CustomEventBus.Arn
+          RoleArn: !GetAtt EventBridgeRole.Arn
+
+  ResiliencyPolicyNonCritical:
+    Type: 'AWS::ResilienceHub::ResiliencyPolicy'
+    Properties:
+      Policy:
+        Software:
+          RpoInSecs: 86400
+          RtoInSecs: 172800
+        Hardware:
+          RpoInSecs: 86400
+          RtoInSecs: 172800
+        AZ:
+          RpoInSecs: 86400
+          RtoInSecs: 172800
+      PolicyName: NonCritical
+      Tier: NonCritical
+  
+  ResiliencyPolicyCoreServices:
+    Type: 'AWS::ResilienceHub::ResiliencyPolicy'
+    Properties:
+      Policy:
+        Software:
+          RpoInSecs: 900
+          RtoInSecs: 3600
+        Hardware:
+          RpoInSecs: 5
+          RtoInSecs: 30
+        AZ:
+          RpoInSecs: 5
+          RtoInSecs: 30
+      PolicyName: CoreServices
+      Tier: CoreServices
+  
+  ResiliencyPolicyImportant:
+    Type: 'AWS::ResilienceHub::ResiliencyPolicy'
+    Properties:
+      Policy:
+        Software:
+          RpoInSecs: 14400
+          RtoInSecs: 172800
+        Hardware:
+          RpoInSecs: 7200
+          RtoInSecs: 172800
+        AZ:
+          RpoInSecs: 7200
+          RtoInSecs: 172800
+      PolicyName: Important
+      Tier: Important
+  
+  ResiliencyPolicyCritical:
+    Type: 'AWS::ResilienceHub::ResiliencyPolicy'
+    Properties:
+      Policy:
+        Software:
+          RpoInSecs: 3600
+          RtoInSecs: 14400
+        Hardware:
+          RpoInSecs: 3600
+          RtoInSecs: 3600
+        AZ:
+          RpoInSecs: 3600
+          RtoInSecs: 3600
+      PolicyName: Critical
+      Tier: Critical
+  
+  ResiliencyPolicyMissionCritical:
+    Type: 'AWS::ResilienceHub::ResiliencyPolicy'
+    Properties:
+      Policy:
+        Software:
+          RpoInSecs: 900
+          RtoInSecs: 3600
+        Hardware:
+          RpoInSecs: 300
+          RtoInSecs: 300
+        AZ:
+          RpoInSecs: 300
+          RtoInSecs: 300
+      PolicyName: MissionCritical
+      Tier: MissionCritical
+
+  ArhCfnStateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - states.amazonaws.com
+              Action: 
+                - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/ReadOnlyAccess
+        - arn:aws:iam::aws:policy/AWSLambda_FullAccess
+      Policies:
+        - PolicyName: AllowResilienceHub
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - "resiliencehub:CreateApp"
+                  - "resiliencehub:DeleteApp"
+                  - "resiliencehub:DeleteAppAssessment"
+                  - "resiliencehub:ImportResourcesToDraftAppVersion"
+                  - "resiliencehub:PublishAppVersion"
+                  - "resiliencehub:StartAppAssessment"
+                  - "resiliencehub:TagResource"
+                  - "resiliencehub:UpdateApp"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:resiliencehub:${AWS::Region}:${AWS::AccountId}:*"
+
+  ArhCfnStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties: 
+      Definition:
+        Comment: >-
+          Create, update, or delete Resilience Hub applications in response to
+          CloudFormation events
+        StartAt: DescribeStacks
+        States:
+          Check Assessment Status:
+            Choices:
+              - Variable: $.Assessments.Assessment.AssessmentStatus
+                StringMatches: Success
+                Next: If Notify
+            Default: Wait for Assessment
+            Type: Choice
+          If Notify:
+            Type: Choice
+            Choices:
+              - Variable: $.ForEachTag[1].Notify
+                StringMatches: 'true'
+                Next: Lambda Invoke
+            Default: Create/Update Successful
+          Lambda Invoke:
+            OutputPath: $.Payload
+            Parameters:
+              FunctionName: !Sub ${FormatMessageFunction.Arn}:$LATEST
+              Payload.$: $.Assessments
+            Resource: arn:aws:states:::aws-sdk:lambda:invoke
+            Retry:
+              - BackoffRate: 2
+                ErrorEquals:
+                  - Lambda.ServiceException
+                  - Lambda.AWSLambdaException
+                  - Lambda.SdkClientException
+                  - Lambda.TooManyRequestsException
+                IntervalSeconds: 2
+                MaxAttempts: 6
+            Type: Task
+            Next: Create/Update Successful
+          Check Import Status:
+            Choices:
+              - Variable: $.Import.Status
+                StringMatches: Success
+                Next: PublishAppVersion
+            Default: Wait for Import
+            Type: Choice
+          Create, Update, Delete:
+            Choices:
+              - Comment: CREATE_COMPLETE
+                Next: ForEach Tag
+                StringEquals: CREATE_COMPLETE
+                Variable: $.Stacks[0].StackStatus
+              - Comment: UPDATE_COMPLETE
+                Next: ForEach Tag
+                StringEquals: UPDATE_COMPLETE
+                Variable: $.Stacks[0].StackStatus
+              - Comment: DELETE_COMPLETE
+                Next: ListApps (Delete)
+                StringEquals: DELETE_COMPLETE
+                Variable: $.Stacks[0].StackStatus
+            Default: Fail
+            Type: Choice
+          Create/Update Successful:
+            Type: Succeed
+          CreateApp:
+            Next: ImportResourcesToDraftAppVersion
+            Parameters:
+              Description: DO NOT DELETE -- This application is managed by CloudFormation
+              Name.$: $.Stacks[0].StackName
+              PolicyArn.$: $.ForEachTag[0].ResiliencyPolicies[0].PolicyArn
+              Tags.$: $.ForEachTag[1]
+            Resource: arn:aws:states:::aws-sdk:resiliencehub:createApp
+            ResultPath: $.Apps
+            Type: Task
+          Delete Successful:
+            Type: Succeed
+          DeleteApp:
+            Next: Delete Successful
+            Parameters:
+              AppArn.$: $.AppSummaries[0].AppArn
+            Resource: arn:aws:states:::aws-sdk:resiliencehub:deleteApp
+            Type: Task
+          DescribeAppAssessment:
+            Next: Check Assessment Status
+            Parameters:
+              AssessmentArn.$: $.Assessments.Assessment.AssessmentArn
+            Resource: arn:aws:states:::aws-sdk:resiliencehub:describeAppAssessment
+            Type: Task
+            ResultPath: $.Assessments
+          DescribeDraftAppVersionResourcesImportStatus:
+            Next: Check Import Status
+            Parameters:
+              AppArn.$: $.Import.AppArn
+            Resource: >-
+              arn:aws:states:::aws-sdk:resiliencehub:describeDraftAppVersionResourcesImportStatus
+            Type: Task
+            ResultPath: $.Import
+          DescribeStacks:
+            Next: Create, Update, Delete
+            Parameters:
+              StackName.$: $.detail.stack-id
+            Resource: arn:aws:states:::aws-sdk:cloudformation:describeStacks
+            Type: Task
+          Fail:
+            Type: Fail
+          ForEach Assessment:
+            ItemProcessor:
+              ProcessorConfig:
+                Mode: INLINE
+              StartAt: DeleteAppAssessment
+              States:
+                DeleteAppAssessment:
+                  End: true
+                  Parameters:
+                    AssessmentArn.$: $.AssessmentArn
+                  Resource: arn:aws:states:::aws-sdk:resiliencehub:deleteAppAssessment
+                  ResultPath: null
+                  Type: Task
+            ItemsPath: $.result.AssessmentSummaries
+            Next: DeleteApp
+            ResultPath: null
+            Type: Map
+          ForEach Tag:
+            ItemProcessor:
+              ProcessorConfig:
+                Mode: INLINE
+              StartAt: Check for 'app_criticality'
+              States:
+                Check for 'app_criticality':
+                  Choices:
+                    - Next: ListResiliencyPolicies
+                      StringMatches: app_criticality
+                      Variable: $.Key
+                    - StringMatches: app_owner
+                      Variable: $.Key
+                      Next: UpdateFunctionConfiguration
+                  Default: Pass
+                  Type: Choice
+                UpdateFunctionConfiguration:
+                  Type: Task
+                  Next: Notify?
+                  Parameters:
+                    FunctionName: !Sub ${FormatMessageFunction.Arn}:$LATEST
+                    Environment:
+                      Variables:
+                        SNS_TOPIC.$: $.Value
+                  Resource: arn:aws:states:::aws-sdk:lambda:updateFunctionConfiguration
+                Notify?:
+                  Type: Pass
+                  End: true
+                  Result:
+                    Notify: 'true'
+                ListResiliencyPolicies:
+                  End: true
+                  Parameters:
+                    PolicyName.$: $.Value
+                  Resource: arn:aws:states:::aws-sdk:resiliencehub:listResiliencyPolicies
+                  Type: Task
+                Pass:
+                  End: true
+                  Type: Pass
+            ItemsPath: $.Stacks[0].Tags
+            Next: ListApps
+            ResultPath: $.ForEachTag
+            Type: Map
+          If App Found (Delete):
+            Choices:
+              - IsPresent: true
+                Next: ListAppAssessments
+                Variable: $.AppSummaries[0]
+            Default: Delete Successful
+            Type: Choice
+          If Assessment(s) Found:
+            Choices:
+              - IsPresent: true
+                Next: ForEach Assessment
+                Variable: $.result.AssessmentSummaries[0]
+            Default: DeleteApp
+            Type: Choice
+          ImportResourcesToDraftAppVersion:
+            Next: Wait for Import
+            Parameters:
+              AppArn.$: $.Apps.App.AppArn
+              SourceArns.$: States.Array($.Stacks[0].StackId)
+            Resource: arn:aws:states:::aws-sdk:resiliencehub:importResourcesToDraftAppVersion
+            Type: Task
+            ResultPath: $.Import
+          ListAppAssessments:
+            Next: If Assessment(s) Found
+            Parameters:
+              AppArn.$: $.AppSummaries[0].AppArn
+            Resource: arn:aws:states:::aws-sdk:resiliencehub:listAppAssessments
+            ResultPath: $.result
+            Type: Task
+          ListApps:
+            Next: UPDATE/CREATE
+            Parameters:
+              Name.$: $.Stacks[0].StackName
+            Resource: arn:aws:states:::aws-sdk:resiliencehub:listApps
+            ResultPath: $.Apps
+            Type: Task
+          ListApps (Delete):
+            Next: If App Found (Delete)
+            Parameters:
+              Name.$: $.Stacks[0].StackName
+            Resource: arn:aws:states:::aws-sdk:resiliencehub:listApps
+            Type: Task
+          PublishAppVersion:
+            Next: StartAppAssessment
+            Parameters:
+              AppArn.$: $.Import.AppArn
+            Resource: arn:aws:states:::aws-sdk:resiliencehub:publishAppVersion
+            Type: Task
+            ResultPath: $.App
+          StartAppAssessment:
+            Next: Wait for Assessment
+            Parameters:
+              AppArn.$: $.App.AppArn
+              AppVersion: release
+              AssessmentName.$: States.Format('Assessment-report-{}', States.UUID())
+            Resource: arn:aws:states:::aws-sdk:resiliencehub:startAppAssessment
+            Type: Task
+            ResultPath: $.Assessments
+          UPDATE/CREATE:
+            Choices:
+              - And:
+                  - Variable: $.Stacks[0].StackStatus
+                    StringEquals: UPDATE_COMPLETE
+                  - Variable: $.Apps.AppSummaries[0]
+                    IsPresent: true
+                Next: UpdateApp
+            Default: CreateApp
+            Type: Choice
+          UpdateApp:
+            Next: ImportResourcesToDraftAppVersion
+            Parameters:
+              AppArn.$: $.Apps.AppSummaries[0].AppArn
+              PolicyArn.$: $.ForEachTag[0].ResiliencyPolicies[0].PolicyArn
+            Resource: arn:aws:states:::aws-sdk:resiliencehub:updateApp
+            ResultPath: $.Apps
+            Type: Task
+          Wait for Assessment:
+            Next: DescribeAppAssessment
+            Seconds: 5
+            Type: Wait
+          Wait for Import:
+            Next: DescribeDraftAppVersionResourcesImportStatus
+            Seconds: 5
+            Type: Wait
+        TimeoutSeconds: 60
+      Role: !GetAtt ArhCfnStateMachineRole.Arn
+  
+  FormatMessageFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action: 
+                - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AmazonSNSFullAccess
+      Policies:
+        - PolicyName: AllowResilienceHub
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - "resiliencehub:DescribeApp"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:resiliencehub:${AWS::Region}:${AWS::AccountId}:*"
+  
+  FormatMessageFunction:
+    Type: AWS::Lambda::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "This function does not need to communicate with any resources within a customer VPC - only AWS services"
+    Properties:
+      Role: !GetAtt FormatMessageFunctionRole.Arn
+      Environment:
+        Variables:
+          SNS_TOPIC: blank
+      Code:
+        ZipFile: |
+          import boto3
+          import os
+
+          resiliencehub = boto3.client('resiliencehub')
+          sns = boto3.client('sns')
+
+          def lambda_handler(event, context):
+              print("Event Received: ", event)
+              
+              assessment = event['Assessment']
+              app_details = resiliencehub.describe_app(
+                  appArn = assessment['AppArn']
+              )
+
+              assessment_name = assessment['AssessmentName']
+              region = assessment['AppArn'].split(":")[3]
+              app_name = app_details['app']['name']
+              url = f"https://{region}.console.aws.amazon.com/resiliencehub/home?region={region}#/application/{app_name}/assessment-reports/{assessment_name}"
+              
+              message = f"""
+              Here are the results from your most recent assessment report
+              
+              Application:\t\t{app_name}
+              Assessment Status:\t{assessment['AssessmentStatus']}
+              Compliance Status:\t{assessment['ComplianceStatus']}
+              Policy:\t\t{assessment['Policy']['PolicyName']}
+              
+              View Report in AWS Console: {url}
+              
+              """    
+
+              # publish the string to the SNS topic
+              sns.publish(
+                  TopicArn=os.environ.get('SNS_TOPIC'),
+                  Message=message,
+                  Subject=f"AWS Resilience Hub Assessment Completed for App [{app_name}]",
+                  MessageAttributes={
+                      'AppName': {
+                          'DataType': 'String',
+                          'StringValue': app_name
+                      }
+                  }
+              )
+              return {
+                  'statusCode': 200,
+                  'body': url
+              }
+      Handler: index.lambda_handler
+      Runtime: python3.10
+      ReservedConcurrentExecutions: 2
+      TracingConfig:
+        Mode: Active
