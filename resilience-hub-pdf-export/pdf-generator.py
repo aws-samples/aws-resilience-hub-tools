@@ -40,6 +40,7 @@ for region in regions:
     for app_arn in app_arns:
         app_details = arh.describe_app(appArn=app_arn)['app']
         app_name = app_details['name']
+        app_arn = app_details['appArn']
         app_compliance = app_details['complianceStatus']
         app_res_score = app_details['resiliencyScore']
         app_tier = 'unknown'
@@ -51,6 +52,7 @@ for region in regions:
 
         flowables.append(Paragraph(f"<u>Application:</u> {app_name}", header_style))
         flowables.append(Spacer(1, 12))
+        flowables.append(Paragraph(f"<b>ARN:</b> {app_arn}", style))
         flowables.append(Paragraph(f"<b>Compliance Status:</b> {app_compliance}", style))
         flowables.append(Paragraph(f"<b>Resiliency Score:</b> {app_res_score}", style))
         flowables.append(Paragraph(f"<b>Application Tier:</b> {app_tier}", style))
@@ -82,7 +84,7 @@ for region in regions:
                 assessment_name = latest_assessment['assessmentName']
                 assessment_compliance_status = latest_assessment['complianceStatus']
                 end_time = latest_assessment['endTime']
-                flowables.append(Paragraph(f"<b>Assessment Name:</b> {assessment_name}", style))
+                flowables.append(Paragraph(f"<b>Latest Assessment Name:</b> {assessment_name}", style))
                 flowables.append(Paragraph(f"<b>Assessment Compliance Status:</b> {assessment_compliance_status}", style))
                 flowables.append(Paragraph(f"<b>End Time:</b> {end_time}", style))
                 flowables.append(Spacer(1, 12))
@@ -98,8 +100,8 @@ for region in regions:
                         rpo_color = green if latest_assessment['compliance'][dtype]['currentRpoInSecs'] <= latest_assessment['policy']['policy'][dtype]['rpoInSecs'] else red
 
                         flowables.append(Paragraph(f"<b>{dtype} Disruption Type:</b>", style))
-                        flowables.append(Paragraph(f"<font color='{rto_color}'>Current RTO:</font> {current_rto} <b>Target RTO:</b> {target_rto}", style))
-                        flowables.append(Paragraph(f"<font color='{rpo_color}'>Current RPO:</font> {current_rpo} <b>Target RPO:</b> {target_rpo}", style))
+                        flowables.append(Paragraph(f"<b> <font color='{rto_color}'>Current RTO:</font> </b> {current_rto} <b>Target RTO:</b> {target_rto}", style))
+                        flowables.append(Paragraph(f"<b> <font color='{rpo_color}'>Current RPO:</font> </b> {current_rpo} <b>Target RPO:</b> {target_rpo}", style))
                         flowables.append(Spacer(1, 12))
 
 doc.build(flowables)
