@@ -17,9 +17,10 @@ This guide shows how to export assessment results for all applications defined w
 
 ## Output
 
-The script will generate a PDF file that contains details of all assessments for all applications defined within Resilience Hub in a single region. The PDF file will be stored in the same location as where the script was executed and contains the following information in a table format:
+The script will generate a PDF file that contains details of all latest assessments for all applications defined within Resilience Hub. The PDF file will be stored in the same location as where the script was executed and contains the following information in a table format:
 
 * **Application Name** - the name of the application as defined within Resilience Hub.
+* **Application ARN** - the ARN of an application.
 * **Assessment Name** - the name of an assessment for an application.
 * **Assessment Compliance Status** - indicates if the associated assessment was evaluated as being compliant with the resiliency policy.
 * **End Time** - identifies the end time of an assessment.
@@ -31,6 +32,5 @@ The script will generate a PDF file that contains details of all assessments for
 * **Resiliency Score** - the [resiliency score](https://docs.aws.amazon.com/resilience-hub/latest/userguide/resil-score.html) of the application.
 * **Last Assessed** - timestamp of the most recent assessment.
 * **Application Tier** - application tier as defined by the resiliency policy associated with the application.
-* **Region** - the AWS Region where the application is defined in Resilience Hub.
 
-The PDF file has a clean layout with a title and a table for the report. Note that PDF generation is more complex than CSV and the aesthetics of the report can be enhanced with more customization if needed.
+The PDF file has a clean layout, separated for each application, note that it might take a few minutes as we scan every application in every region.
