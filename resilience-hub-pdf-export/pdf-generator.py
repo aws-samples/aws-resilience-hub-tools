@@ -82,6 +82,7 @@ for region in regions:
             if successful_assessments:
                 latest_assessment = max(successful_assessments, key=lambda x: x['endTime'])
                 assessment_name = latest_assessment['assessmentName']
+                assessment_arn = latest_assessment['assessmentArn']
                 assessment_compliance_status = latest_assessment['complianceStatus']
                 end_time = latest_assessment['endTime']
                 flowables.append(Paragraph(f"<b>Latest Assessment Name:</b> {assessment_name}", style))
@@ -89,23 +90,44 @@ for region in regions:
                 flowables.append(Paragraph(f"<b>End Time:</b> {end_time}", style))
                 flowables.append(Spacer(1, 12))
 
+                component_compliances = []
+                response = arh.list_app_component_compliances(assessmentArn=assessment_arn)
+                component_compliances.extend(response['componentCompliances'])
+
+                while 'NextToken' in response:
+                    response = arh.list_app_component_compliances(assessmentArn=assessment_arn, NextToken=response['NextToken'])
+                    component_compliances.extend(response['componentCompliances'])
+
                 for dtype in ['AZ', 'Region', 'Hardware', 'Software']:
                     if dtype in latest_assessment['compliance']:
-                        current_rto = seconds_to_time(latest_assessment['compliance'][dtype]['currentRtoInSecs'])
-                        target_rto = seconds_to_time(latest_assessment['policy']['policy'][dtype]['rtoInSecs'])
-                        current_rpo = seconds_to_time(latest_assessment['compliance'][dtype]['currentRpoInSecs'])
-                        target_rpo = seconds_to_time(latest_assessment['policy']['policy'][dtype]['rpoInSecs'])
-                        rto_description = latest_assessment['compliance'][dtype]['rtoDescription']
-                        rpo_description = latest_assessment['compliance'][dtype]['rpoDescription']
+                        current_rto = latest_assessment['compliance'][dtype]['currentRtoInSecs']
+                        target_rto = latest_assessment['policy']['policy'][dtype]['rtoInSecs']
+                        current_rpo = latest_assessment['compliance'][dtype]['currentRpoInSecs']
+                        target_rpo = latest_assessment['policy']['policy'][dtype]['rpoInSecs']
 
                         rto_color = green if latest_assessment['compliance'][dtype]['currentRtoInSecs'] <= latest_assessment['policy']['policy'][dtype]['rtoInSecs'] else red
                         rpo_color = green if latest_assessment['compliance'][dtype]['currentRpoInSecs'] <= latest_assessment['policy']['policy'][dtype]['rpoInSecs'] else red
 
                         flowables.append(Paragraph(f"<b>{dtype} Disruption Type:</b>", style))
-                        flowables.append(Paragraph(f"<b> <font color='{rto_color}'>Current RTO:</font> </b> {current_rto} <b>Target RTO:</b> {target_rto}", style))
-                        flowables.append(Paragraph(f"<b> Description: </b> {rto_description}", style))
-                        flowables.append(Paragraph(f"<b> <font color='{rpo_color}'>Current RPO:</font> </b> {current_rpo} <b>Target RPO:</b> {target_rpo}", style))
-                        flowables.append(Paragraph(f"<b> Description: </b> {rpo_description}", style))
+                        flowables.append(Paragraph(f"<b> <font color='{rto_color}'>Current RTO:</font> </b> {seconds_to_time(current_rto)} <b>Target RTO:</b> {seconds_to_time(target_rto)}", style))
+                        flowables.append(Paragraph(f"<b> <font color='{rpo_color}'>Current RPO:</font> </b> {seconds_to_time(current_rpo)} <b>Target RPO:</b> {seconds_to_time(target_rpo)}", style))
+                        flowables.append(Spacer(1, 12))
+
+                        for component_compliance in component_compliances:
+                            app_component_name = component_compliance['appComponentName']
+                            component_compliance_status = component_compliance['status']
+                            component_current_rto = component_compliance['compliance'][dtype]['currentRtoInSecs']
+                            component_current_rpo = component_compliance['compliance'][dtype]['currentRpoInSecs']
+                            component_rto_description = component_compliance['compliance'][dtype]['rtoDescription']
+                            component_rpo_description = component_compliance['compliance'][dtype]['rpoDescription']
+
+                            # Check if component compliance matches the current RTO and RPO
+                            if (component_current_rto == current_rto):
+                                flowables.append(Paragraph(f"<b>RTO Description:</b> {component_rto_description} ({app_component_name})", style))
+
+                            if (component_current_rpo == current_rpo):
+                                flowables.append(Paragraph(f"<b>RPO Description:</b> {component_rpo_description} ({app_component_name})", style))
+
                         flowables.append(Spacer(1, 12))
 
 doc.build(flowables)
