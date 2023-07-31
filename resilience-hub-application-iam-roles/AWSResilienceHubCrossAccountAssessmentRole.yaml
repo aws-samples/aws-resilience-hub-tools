@@ -1,0 +1,25 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Parameters:
+  RoleName:
+    Type: String
+    Default: AWSResilienceHubCrossAccountAssessmentRole
+    Description: The role name for a cross account IAM role used in the AWS Resilience Hub application.
+  AWSResilienceHubPrimaryAccountAssessmentRoleARN:
+    Type: String
+    Description: The IAM role ARN used for the AWS Resilience Hub application in your primary account.
+Resources:
+  AWSResilienceHubAssessmentRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: !Ref RoleName
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              AWS:
+                - !Ref AWSResilienceHubPrimaryAccountAssessmentRoleARN
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSResilienceHubAsssessmentExecutionPolicy
