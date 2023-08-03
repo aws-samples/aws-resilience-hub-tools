@@ -13,7 +13,9 @@ Collection of solutions and tools to customize and enhance your usage of [AWS Re
 * [resilience-reporter](./resilience-reporter) - Creates an Amazon QuickSight dashboard that contains data from Resilience Hub for all applications
 * [resource-group-enhancer](./resource-group-enhancer) - Add resources not supported by AWS Resource Group to an application in Resilience Hub
 * [scheduled-assessment-role](./scheduled-assessment-role) - Creates an Identity and Access Management (IAM) role to be used by Resilience Hub for running scheduled (daily) assessments
-* [cloudformation-eventbridge-integration](./cloudformation-eventbridge-integration) - Example of how Resilience Hub can be integrated with Eventbridge to track Cloudformation deployments for contiuous resilience
+* [cloudformation-eventbridge-integration](./cloudformation-eventbridge-integration) - Example of how Resilience Hub can be integrated with Eventbridge to track Cloudformation deployments for continuous resilience
+* [resilience-hub-application-iam-roles](./resilience-hub-application-iam-roles) - Example of how Resilience Hub can be integrated with Eventbridge to track Cloudformation deployments for contiuous resilience
+
 
 ## License
 

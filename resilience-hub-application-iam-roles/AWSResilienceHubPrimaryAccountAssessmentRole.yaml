@@ -1,0 +1,51 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Parameters:
+  RoleName:
+    Type: String
+    Default: AWSResilienceHubAssessmentRole
+    Description: The AWS Resilience Hub application IAM role name
+  CrossAccountIAMRoleARNs:
+    Type: List<String>
+    Default: ""
+    Description: Enter a comma separated list of cross account IAM role ARNs, if your AWS Resilience Hub application resources are deployed in multiple infrastructure accounts.
+  AWSResilienceHubCrossAccountAssumeRolePolicyName:
+    Type: String
+    Default: AWSResilienceHubCrossAccountAssumeRolePolicy
+    Description: The name of the inline policy which will be created, allowing the AWS Resilience Hub primary account role to assume cross account IAM role ARNs.
+Conditions:
+  IsCrossAccountIAMRoleListEmpty: !Equals
+    - !Join [ "", !Ref CrossAccountIAMRoleARNs ]
+    - ""
+  IsCrossAccountIAMRoleListNotEmpty:
+    !Not [ Condition: IsCrossAccountIAMRoleListEmpty ]
+Resources:
+  AWSResilienceHubAssessmentRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: !Ref RoleName
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "resiliencehub.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSResilienceHubAsssessmentExecutionPolicy
+
+
+  AWSResilienceHubCrossAccountAssumeRolePolicy:
+    Type: "AWS::IAM::Policy"
+    Condition: IsCrossAccountIAMRoleListNotEmpty
+    Properties:
+      PolicyName: !Ref AWSResilienceHubCrossAccountAssumeRolePolicyName
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Action: "sts:AssumeRole"
+            Resource: !Ref CrossAccountIAMRoleARNs
+      Roles:
+        - !Ref AWSResilienceHubAssessmentRole
