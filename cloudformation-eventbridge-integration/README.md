@@ -26,7 +26,7 @@ Steps:
    
 ![Add Tags Image](add-tag.png)
 
-3. Once deployed the template is deployed, the solution will automatically handle the create/update/delete process for resources in ARH.
+3. Once the template is deployed, the solution will automatically handle the create/update/delete process for resources in ARH.
 
 ## Reference Architecture
 #### AWS Architecture
