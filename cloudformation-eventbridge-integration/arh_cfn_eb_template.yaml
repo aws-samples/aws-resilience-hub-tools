@@ -219,40 +219,16 @@ Resources:
         States:
           Check Assessment Status:
             Choices:
-              - Variable: $.Assessments.Assessment.AssessmentStatus
+              - Next: Create/Update Successful
                 StringMatches: Success
-                Next: If Notify
+                Variable: $.Assessments.Assessment.AssessmentStatus
             Default: Wait for Assessment
             Type: Choice
-          If Notify:
-            Type: Choice
-            Choices:
-              - Variable: $.ForEachTag[1].Notify
-                StringMatches: 'true'
-                Next: Lambda Invoke
-            Default: Create/Update Successful
-          Lambda Invoke:
-            OutputPath: $.Payload
-            Parameters:
-              FunctionName: !Sub ${FormatMessageFunction.Arn}:$LATEST
-              Payload.$: $.Assessments
-            Resource: arn:aws:states:::aws-sdk:lambda:invoke
-            Retry:
-              - BackoffRate: 2
-                ErrorEquals:
-                  - Lambda.ServiceException
-                  - Lambda.AWSLambdaException
-                  - Lambda.SdkClientException
-                  - Lambda.TooManyRequestsException
-                IntervalSeconds: 2
-                MaxAttempts: 6
-            Type: Task
-            Next: Create/Update Successful
           Check Import Status:
             Choices:
-              - Variable: $.Import.Status
+              - Next: PublishAppVersion
                 StringMatches: Success
-                Next: PublishAppVersion
+                Variable: $.Import.Status
             Default: Wait for Import
             Type: Choice
           Create, Update, Delete:
@@ -274,12 +250,12 @@ Resources:
           Create/Update Successful:
             Type: Succeed
           CreateApp:
-            Next: ImportResourcesToDraftAppVersion
+            Next: Update Tags
             Parameters:
               Description: DO NOT DELETE -- This application is managed by CloudFormation
               Name.$: $.Stacks[0].StackName
-              PolicyArn.$: $.ForEachTag[0].ResiliencyPolicies[0].PolicyArn
-              Tags.$: $.ForEachTag[1]
+              PolicyArn.$: $.ForEachTag.PolicyArn
+              EventSubscriptions.$: $.ForEachTag.Notify
             Resource: arn:aws:states:::aws-sdk:resiliencehub:createApp
             ResultPath: $.Apps
             Type: Task
@@ -296,16 +272,16 @@ Resources:
             Parameters:
               AssessmentArn.$: $.Assessments.Assessment.AssessmentArn
             Resource: arn:aws:states:::aws-sdk:resiliencehub:describeAppAssessment
-            Type: Task
             ResultPath: $.Assessments
+            Type: Task
           DescribeDraftAppVersionResourcesImportStatus:
             Next: Check Import Status
             Parameters:
               AppArn.$: $.Import.AppArn
             Resource: >-
               arn:aws:states:::aws-sdk:resiliencehub:describeDraftAppVersionResourcesImportStatus
-            Type: Task
             ResultPath: $.Import
+            Type: Task
           DescribeStacks:
             Next: Create, Update, Delete
             Parameters:
@@ -342,38 +318,51 @@ Resources:
                     - Next: ListResiliencyPolicies
                       StringMatches: app_criticality
                       Variable: $.Key
-                    - StringMatches: app_owner
+                    - Next: Format Notification Types
+                      StringMatches: app_owner
                       Variable: $.Key
-                      Next: UpdateFunctionConfiguration
-                  Default: Pass
                   Type: Choice
-                UpdateFunctionConfiguration:
-                  Type: Task
-                  Next: Notify?
-                  Parameters:
-                    FunctionName: !Sub ${FormatMessageFunction.Arn}:$LATEST
-                    Environment:
-                      Variables:
-                        SNS_TOPIC.$: $.Value
-                  Resource: arn:aws:states:::aws-sdk:lambda:updateFunctionConfiguration
-                Notify?:
+                  Default: Pass
+                Pass:
                   Type: Pass
                   End: true
-                  Result:
-                    Notify: 'true'
+                Format Notification Types:
+                  Type: Parallel
+                  Branches:
+                    - StartAt: Type 1
+                      States:
+                        Type 1:
+                          Type: Pass
+                          Parameters:
+                            EventType: DriftDetected
+                            Name: DriftDetected
+                            SnsTopicArn.$: $.Value
+                          End: true
+                    - StartAt: Type 2
+                      States:
+                        Type 2:
+                          Type: Pass
+                          End: true
+                          Parameters:
+                            EventType: ScheduledAssessmentFailure
+                            Name: ScheduledAssessmentFailure
+                            SnsTopicArn.$: $.Value
+                  End: true
                 ListResiliencyPolicies:
                   End: true
                   Parameters:
                     PolicyName.$: $.Value
                   Resource: arn:aws:states:::aws-sdk:resiliencehub:listResiliencyPolicies
                   Type: Task
-                Pass:
-                  End: true
-                  Type: Pass
+                  ResultSelector:
+                    PolicyArn.$: $.ResiliencyPolicies[0].PolicyArn
             ItemsPath: $.Stacks[0].Tags
             Next: ListApps
             ResultPath: $.ForEachTag
             Type: Map
+            ResultSelector:
+              PolicyArn.$: $.[0].PolicyArn
+              Notify.$: $..[?(@.EventType)]
           If App Found (Delete):
             Choices:
               - IsPresent: true
@@ -394,8 +383,8 @@ Resources:
               AppArn.$: $.Apps.App.AppArn
               SourceArns.$: States.Array($.Stacks[0].StackId)
             Resource: arn:aws:states:::aws-sdk:resiliencehub:importResourcesToDraftAppVersion
-            Type: Task
             ResultPath: $.Import
+            Type: Task
           ListAppAssessments:
             Next: If Assessment(s) Found
             Parameters:
@@ -421,8 +410,8 @@ Resources:
             Parameters:
               AppArn.$: $.Import.AppArn
             Resource: arn:aws:states:::aws-sdk:resiliencehub:publishAppVersion
-            Type: Task
             ResultPath: $.App
+            Type: Task
           StartAppAssessment:
             Next: Wait for Assessment
             Parameters:
@@ -430,26 +419,44 @@ Resources:
               AppVersion: release
               AssessmentName.$: States.Format('Assessment-report-{}', States.UUID())
             Resource: arn:aws:states:::aws-sdk:resiliencehub:startAppAssessment
-            Type: Task
             ResultPath: $.Assessments
+            Type: Task
           UPDATE/CREATE:
             Choices:
               - And:
-                  - Variable: $.Stacks[0].StackStatus
-                    StringEquals: UPDATE_COMPLETE
-                  - Variable: $.Apps.AppSummaries[0]
-                    IsPresent: true
+                  - StringEquals: UPDATE_COMPLETE
+                    Variable: $.Stacks[0].StackStatus
+                  - IsPresent: true
+                    Variable: $.Apps.AppSummaries[0]
                 Next: UpdateApp
             Default: CreateApp
             Type: Choice
           UpdateApp:
-            Next: ImportResourcesToDraftAppVersion
+            Next: Update Tags
             Parameters:
               AppArn.$: $.Apps.AppSummaries[0].AppArn
-              PolicyArn.$: $.ForEachTag[0].ResiliencyPolicies[0].PolicyArn
+              PolicyArn.$: $.ForEachTag.PolicyArn
+              EventSubscriptions.$: $.ForEachTag.Notify
             Resource: arn:aws:states:::aws-sdk:resiliencehub:updateApp
             ResultPath: $.Apps
             Type: Task
+          Update Tags:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters:
+              Payload.$: $
+              FunctionName: !Sub ${UpdateTagsFunction.Arn}:$LATEST
+            Retry:
+              - ErrorEquals:
+                  - Lambda.ServiceException
+                  - Lambda.AWSLambdaException
+                  - Lambda.SdkClientException
+                  - Lambda.TooManyRequestsException
+                IntervalSeconds: 1
+                MaxAttempts: 3
+                BackoffRate: 2
+            Next: ImportResourcesToDraftAppVersion
+            ResultPath: null
           Wait for Assessment:
             Next: DescribeAppAssessment
             Seconds: 5
@@ -458,10 +465,10 @@ Resources:
             Next: DescribeDraftAppVersionResourcesImportStatus
             Seconds: 5
             Type: Wait
-        TimeoutSeconds: 60
+        TimeoutSeconds: 60      
       Role: !GetAtt ArhCfnStateMachineRole.Arn
   
-  FormatMessageFunctionRole:
+  UpdateTagsFunctionRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -475,19 +482,20 @@ Resources:
                 - "sts:AssumeRole"
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-        - arn:aws:iam::aws:policy/AmazonSNSFullAccess
       Policies:
-        - PolicyName: AllowResilienceHub
+        - PolicyName: AllowResilienceHubTagging
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action: 
-                  - "resiliencehub:DescribeApp"
+                  - "resiliencehub:ListTagsForResource"
+                  - "resiliencehub:TagResource"
+                  - "resiliencehub:UntagResource"
                 Resource:
                   - !Sub "arn:${AWS::Partition}:resiliencehub:${AWS::Region}:${AWS::AccountId}:*"
   
-  FormatMessageFunction:
+  UpdateTagsFunction:
     Type: AWS::Lambda::Function
     Metadata:
       cfn_nag:
@@ -495,61 +503,46 @@ Resources:
           - id: W89
             reason: "This function does not need to communicate with any resources within a customer VPC - only AWS services"
     Properties:
-      Role: !GetAtt FormatMessageFunctionRole.Arn
+      Role: !GetAtt UpdateTagsFunctionRole.Arn
       Environment:
         Variables:
           SNS_TOPIC: blank
       Code:
         ZipFile: |
           import boto3
-          import os
+          import json
 
-          resiliencehub = boto3.client('resiliencehub')
-          sns = boto3.client('sns')
+          arh = boto3.client("resiliencehub")
 
           def lambda_handler(event, context):
-              print("Event Received: ", event)
+              # Get ARH app arn from event
+              app_arn = event["Apps"]["App"]["AppArn"]
               
-              assessment = event['Assessment']
-              app_details = resiliencehub.describe_app(
-                  appArn = assessment['AppArn']
-              )
-
-              assessment_name = assessment['AssessmentName']
-              region = assessment['AppArn'].split(":")[3]
-              app_name = app_details['app']['name']
-              url = f"https://{region}.console.aws.amazon.com/resiliencehub/home?region={region}#/application/{app_name}/assessment-reports/{assessment_name}"
+              # Get list of tags from the event, reformat into key:value
+              tags = {}
+              for t in event["Stacks"][0]["Tags"]:
+                  key = t["Key"]
+                  value = t["Value"]
+                  tags[key] = value
               
-              message = f"""
-              Here are the results from your most recent assessment report
+              try:
+                  # Check for existing tags, remove if present
+                  existing_tags = arh.list_tags_for_resource(resourceArn=app_arn)
+                  if len(existing_tags['tags']) > 0:
+                      arh.untag_resource(resourceArn=app_arn, tagKeys=list(existing_tags['tags'].keys()))
+                  
+                  # Don't update tags if none were listed in the event
+                  if len(tags) > 0:
+                      update_tags = arh.tag_resource(resourceArn=app_arn, tags=tags)
+              except Exception as e:
+                  print("The error is: ",e)
               
-              Application:\t\t{app_name}
-              Assessment Status:\t{assessment['AssessmentStatus']}
-              Compliance Status:\t{assessment['ComplianceStatus']}
-              Policy:\t\t{assessment['Policy']['PolicyName']}
-              
-              View Report in AWS Console: {url}
-              
-              """    
-
-              # publish the string to the SNS topic
-              sns.publish(
-                  TopicArn=os.environ.get('SNS_TOPIC'),
-                  Message=message,
-                  Subject=f"AWS Resilience Hub Assessment Completed for App [{app_name}]",
-                  MessageAttributes={
-                      'AppName': {
-                          'DataType': 'String',
-                          'StringValue': app_name
-                      }
-                  }
-              )
               return {
                   'statusCode': 200,
-                  'body': url
+                  'body': "Current tags: {}".format(json.dumps(tags))
               }
       Handler: index.lambda_handler
-      Runtime: python3.10
+      Runtime: python3.11
       ReservedConcurrentExecutions: 2
       TracingConfig:
         Mode: Active
