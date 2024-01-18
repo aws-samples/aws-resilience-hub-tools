@@ -95,6 +95,52 @@ Resources:
           Arn: !GetAtt CustomEventBus.Arn
           RoleArn: !GetAtt EventBridgeRole.Arn
 
+  SendToTFBusRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName: default
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - Object Created
+          - Object Deleted
+        detail:
+          bucket:
+            name:
+              - vsi-tfstate
+          object:
+            key:
+              - suffix: .tfstate
+      State: ENABLED
+      Targets:
+        - Id: 0
+          Arn: !GetAtt CustomEventBus.Arn
+          RoleArn: !GetAtt EventBridgeRole.Arn
+
+  TFStateChangeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName: !Ref CustomEventBus
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - Object Created
+          - Object Deleted
+        detail:
+          bucket:
+            name:
+              - vsi-tfstate
+          object:
+            key:
+              - suffix: .tfstate
+      State: ENABLED
+      Targets:
+        - Id: 0
+          Arn: !GetAtt ArhCfnStateMachine.Arn
+          RoleArn: !GetAtt EventBridgeToStepFunctionsRole.Arn
+
   ResiliencyPolicyNonCritical:
     Type: 'AWS::ResilienceHub::ResiliencyPolicy'
     Properties:
@@ -215,7 +261,10 @@ Resources:
         Comment: >-
           Create, update, or delete Resilience Hub applications in response to
           CloudFormation events
-        StartAt: DescribeStacks
+        #V - Start
+        StartAt: Check Event Source
+        #StartAt: DescribeStacks
+        #V - End
         States:
           Check Assessment Status:
             Choices:
@@ -224,6 +273,18 @@ Resources:
                 Variable: $.Assessments.Assessment.AssessmentStatus
             Default: Wait for Assessment
             Type: Choice
+          #V - Start
+          Check Event Source:
+            Choices:
+              - Next: DescribeStacks
+                StringMatches: aws.cloudformation
+                Variable: $.source
+              - Next: DescribeS3Object (TF)
+                StringMatches: aws.s3
+                Variable: $.source
+            Default: Fail
+            Type: Choice
+          #V - End
           Check Import Status:
             Choices:
               - Next: PublishAppVersion
@@ -247,6 +308,20 @@ Resources:
                 Variable: $.Stacks[0].StackStatus
             Default: Fail
             Type: Choice
+          #V - Start
+          Create, Update, Delete (TF):
+            Choices:
+              - Comment: CREATE or UPDATE complete
+                Next: ForEach Tag (TF)
+                StringEquals: Object Created
+                Variable: $.detail-type
+              - Comment: DELETE_COMPLETE
+                Next: ListApps (Delete TF)
+                StringEquals: Object Deleted
+                Variable: $.detail-type
+            Default: Fail
+            Type: Choice
+          #V - End
           Create/Update Successful:
             Type: Succeed
           CreateApp:
@@ -259,6 +334,19 @@ Resources:
             Resource: arn:aws:states:::aws-sdk:resiliencehub:createApp
             ResultPath: $.Apps
             Type: Task
+          #V - Start
+          CreateApp (TF):
+            #End: true
+            Next: Update Tags (TF)
+            Parameters:
+              Description: DO NOT DELETE -- This application is managed by CloudFormation
+              Name.$: $.StateFileObject.ArhAppName
+              PolicyArn.$: $.ForEachTag.PolicyArn
+              EventSubscriptions.$: $.ForEachTag.Notify
+            Resource: arn:aws:states:::aws-sdk:resiliencehub:createApp
+            ResultPath: $.Apps
+            Type: Task
+          #V - End
           Delete Successful:
             Type: Succeed
           DeleteApp:
@@ -288,6 +376,28 @@ Resources:
               StackName.$: $.detail.stack-id
             Resource: arn:aws:states:::aws-sdk:cloudformation:describeStacks
             Type: Task
+          #V - Start
+          DescribeS3Object (TF):
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters:
+              Payload.$: $
+              FunctionName: !Sub ${ProcessTFStateFile.Arn}:$LATEST
+            Retry:
+              - ErrorEquals:
+                  - Lambda.ServiceException
+                  - Lambda.AWSLambdaException
+                  - Lambda.SdkClientException
+                  - Lambda.TooManyRequestsException
+                IntervalSeconds: 1
+                MaxAttempts: 3
+                BackoffRate: 2
+            Next: Create, Update, Delete (TF)
+            ResultSelector:
+              Tags.$: $.Payload.tags
+              ArhAppName.$: $.Payload.arhAppName
+            ResultPath: $.StateFileObject
+          #V - End
           Fail:
             Type: Fail
           ForEach Assessment:
@@ -363,6 +473,64 @@ Resources:
             ResultSelector:
               PolicyArn.$: $.[0].PolicyArn
               Notify.$: $..[?(@.EventType)]
+          #V - Start
+          ForEach Tag (TF):
+            ItemProcessor:
+              ProcessorConfig:
+                Mode: INLINE
+              StartAt: Check for 'app_criticality' (TF)
+              States:
+                Check for 'app_criticality' (TF):
+                  Choices:
+                    - Next: ListResiliencyPolicies (TF)
+                      StringMatches: app_criticality
+                      Variable: $.Key
+                    - Next: Format Notification Types (TF)
+                      StringMatches: app_owner
+                      Variable: $.Key
+                  Type: Choice
+                  Default: Pass (TF)
+                Pass (TF):
+                  Type: Pass
+                  End: true
+                Format Notification Types (TF):
+                  Type: Parallel
+                  Branches:
+                    - StartAt: Type 1 (TF)
+                      States:
+                        Type 1 (TF):
+                          Type: Pass
+                          Parameters:
+                            EventType: DriftDetected
+                            Name: DriftDetected
+                            SnsTopicArn.$: $.Value
+                          End: true
+                    - StartAt: Type 2 (TF)
+                      States:
+                        Type 2 (TF):
+                          Type: Pass
+                          End: true
+                          Parameters:
+                            EventType: ScheduledAssessmentFailure
+                            Name: ScheduledAssessmentFailure
+                            SnsTopicArn.$: $.Value
+                  End: true
+                ListResiliencyPolicies (TF):
+                  End: true
+                  Parameters:
+                    PolicyName.$: $.Value
+                  Resource: arn:aws:states:::aws-sdk:resiliencehub:listResiliencyPolicies
+                  Type: Task
+                  ResultSelector:
+                    PolicyArn.$: $.ResiliencyPolicies[0].PolicyArn
+            ItemsPath: $.StateFileObject.Tags
+            Next: ListApps (TF)
+            ResultPath: $.ForEachTag
+            Type: Map
+            ResultSelector:
+              PolicyArn.$: $.[0].PolicyArn
+              Notify.$: $..[?(@.EventType)]
+          #V - End
           If App Found (Delete):
             Choices:
               - IsPresent: true
@@ -385,6 +553,14 @@ Resources:
             Resource: arn:aws:states:::aws-sdk:resiliencehub:importResourcesToDraftAppVersion
             ResultPath: $.Import
             Type: Task
+          ImportResourcesToDraftAppVersion (TF):
+            Next: Wait for Import
+            Parameters:
+              AppArn.$: $.Apps.App.AppArn
+              TerraformSources.$: States.Array(States.StringToJson(States.Format('\{"S3StateFileUrl":"s3://{}/{}"\}',$.detail.bucket.name,$.detail.object.key)))
+            Resource: arn:aws:states:::aws-sdk:resiliencehub:importResourcesToDraftAppVersion
+            ResultPath: $.Import
+            Type: Task
           ListAppAssessments:
             Next: If Assessment(s) Found
             Parameters:
@@ -399,12 +575,31 @@ Resources:
             Resource: arn:aws:states:::aws-sdk:resiliencehub:listApps
             ResultPath: $.Apps
             Type: Task
+          #V - Start
+          ListApps (TF):
+            #End: true
+            Next: UPDATE/CREATE (TF)
+            Parameters:
+              Name.$: $.StateFileObject.ArhAppName
+              #States.Format('{}-{}', $.detail.bucket.name, States.ArrayGetItem(States.StringSplit($.detail.object.key, '/'),0))
+            Resource: arn:aws:states:::aws-sdk:resiliencehub:listApps
+            ResultPath: $.Apps
+            Type: Task
+          #V - End
           ListApps (Delete):
             Next: If App Found (Delete)
             Parameters:
               Name.$: $.Stacks[0].StackName
             Resource: arn:aws:states:::aws-sdk:resiliencehub:listApps
             Type: Task
+          #V - Start
+          ListApps (Delete TF):
+            Next: If App Found (Delete)
+            Parameters:
+              Name.$: $.StateFileObject.ArhAppName
+            Resource: arn:aws:states:::aws-sdk:resiliencehub:listApps
+            Type: Task
+          #V - End
           PublishAppVersion:
             Next: StartAppAssessment
             Parameters:
@@ -431,6 +626,15 @@ Resources:
                 Next: UpdateApp
             Default: CreateApp
             Type: Choice
+          #V - Start
+          UPDATE/CREATE (TF):
+            Choices:
+              - IsPresent: true
+                Variable: $.Apps.AppSummaries[0]
+                Next: UpdateApp (TF)
+            Default: CreateApp (TF)
+            Type: Choice
+          #V - End
           UpdateApp:
             Next: Update Tags
             Parameters:
@@ -440,6 +644,18 @@ Resources:
             Resource: arn:aws:states:::aws-sdk:resiliencehub:updateApp
             ResultPath: $.Apps
             Type: Task
+          #V - Start
+          UpdateApp (TF):
+            #End: true
+            Next: Update Tags (TF)
+            Parameters:
+              AppArn.$: $.Apps.AppSummaries[0].AppArn
+              PolicyArn.$: $.ForEachTag.PolicyArn
+              EventSubscriptions.$: $.ForEachTag.Notify
+            Resource: arn:aws:states:::aws-sdk:resiliencehub:updateApp
+            ResultPath: $.Apps
+            Type: Task
+          #V - End
           Update Tags:
             Type: Task
             Resource: arn:aws:states:::lambda:invoke
@@ -457,6 +673,25 @@ Resources:
                 BackoffRate: 2
             Next: ImportResourcesToDraftAppVersion
             ResultPath: null
+          #V - Start
+          Update Tags (TF):
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters:
+              Payload.$: $
+              FunctionName: !Sub ${UpdateTagsFunction.Arn}:$LATEST
+            Retry:
+              - ErrorEquals:
+                  - Lambda.ServiceException
+                  - Lambda.AWSLambdaException
+                  - Lambda.SdkClientException
+                  - Lambda.TooManyRequestsException
+                IntervalSeconds: 1
+                MaxAttempts: 3
+                BackoffRate: 2
+            Next: ImportResourcesToDraftAppVersion (TF)
+            ResultPath: null
+          #V - End
           Wait for Assessment:
             Next: DescribeAppAssessment
             Seconds: 5
@@ -492,9 +727,73 @@ Resources:
                   - "resiliencehub:ListTagsForResource"
                   - "resiliencehub:TagResource"
                   - "resiliencehub:UntagResource"
+                  - "s3:GetObjectTagging"
                 Resource:
                   - !Sub "arn:${AWS::Partition}:resiliencehub:${AWS::Region}:${AWS::AccountId}:*"
+        - PolicyName: AllowReadS3Tags
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - "s3:ListBucket"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::vsi-tfstate"
+              - Effect: Allow
+                Action: 
+                  - "s3:GetObjectTagging"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::vsi-tfstate/*"
   
+  ProcessTFStateFile:
+    Type: AWS::Lambda::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "This function does not need to communicate with any resources within a customer VPC - only AWS services"
+    Properties:
+      Role: !GetAtt UpdateTagsFunctionRole.Arn
+      Environment:
+        Variables:
+          SNS_TOPIC: blank
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+
+          s3_client = boto3.client("s3")
+          def lambda_handler(event, context):
+              try:
+                  bucket_name = event["detail"]["bucket"]["name"]
+                  object_key = event["detail"]["object"]["key"]
+                  
+                  #resilience hub application name - unique
+                  arh_app_name = bucket_name + '-'+ object_key.replace("/","-").replace(".","-")
+                  
+                  #get the tags for the state file
+                  tags = s3_client.get_object_tagging(
+                      Bucket=bucket_name,
+                      Key=object_key
+                  )
+                  return {
+                      'statusCode': 200,
+                      'tags': tags["TagSet"],
+                      'arhAppName': arh_app_name
+                  }
+              except (s3_client.exceptions.NoSuchKey, s3_client.exceptions.AccessDenied) as e:
+                  print("The error is: ",e)
+                  return {
+                      'statusCode': 200,
+                      'tags': [],
+                      'arhAppName': arh_app_name
+                  }
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      ReservedConcurrentExecutions: 2
+      TracingConfig:
+        Mode: Active
+
   UpdateTagsFunction:
     Type: AWS::Lambda::Function
     Metadata:
@@ -517,14 +816,18 @@ Resources:
           def lambda_handler(event, context):
               # Get ARH app arn from event
               app_arn = event["Apps"]["App"]["AppArn"]
-              
               # Get list of tags from the event, reformat into key:value
               tags = {}
-              for t in event["Stacks"][0]["Tags"]:
-                  key = t["Key"]
-                  value = t["Value"]
-                  tags[key] = value
-              
+              if "source" in event and event["source"] == "aws.s3":
+                for t in event["StateFileObject"]["Tags"]:
+                    key = t["Key"]
+                    value = t["Value"]
+                    tags[key] = value
+              else:
+                for t in event["Stacks"][0]["Tags"]:
+                    key = t["Key"]
+                    value = t["Value"]
+                    tags[key] = value
               try:
                   # Check for existing tags, remove if present
                   existing_tags = arh.list_tags_for_resource(resourceArn=app_arn)
