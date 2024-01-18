@@ -665,7 +665,6 @@ Resources:
               try:
                 cfn_client.describe_stacks(StackName=event["detail"]["stack-id"])
                 cfn_stack_id = event["detail"]["stack-id"] 
-                #get the tags for the state file
                 cfn_client_response = cfn_client.describe_stacks(
                     StackName = cfn_stack_id
                 )
