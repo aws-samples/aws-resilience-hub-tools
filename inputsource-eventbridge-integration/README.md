@@ -30,19 +30,19 @@ Steps:
 3. Once the template is deployed, the solution will automatically handle the create/update/delete process for resources in ARH.
 
 #### Using Terraform state files store in S3 bucket
-When uploading Terraform state file to AWS S3 bucket, add the two following tags to the CloudFormation. This will result in automatic creation or update to existing applications in ARH which notifies the application owner of any detected drift or assessment failures.
-
 Steps:
 1. Turn on Amazon EventBridge notifications on the Amazon S3 bucket
 ![Enable EventBridge Notifications Image](eventbridge-on.png)
-2. Upload Terraform state file to Amazon S3 bucket
+2. Upload Terraform state file to Amazon S3 bucket.
 3. During the object upload, add the following tags: 
     1. **(Required)**`app_criticality`, value: STRING from a pre-formatted list from ARH tiers: Valid Values: `MissionCritical | Critical | Important | CoreServices | NonCritical`
-    2. **(Optional)** `app_owner`, value: ARN of valid SNS Topic that will receive the resilience assessment notifications
+    2. **(Optional)** `app_owner`, value: ARN of valid SNS Topic that will receive the resilience assessment notification
+
+This will result an automatic creation or update to existing applications in ARH which notifies the application owner of any detected drift or assessment failures.
    
 ![Add Tags To S3 Image](add-tags-s3.png)
 
-3. Once the object is uploaded, the solution will automatically handle the create/update/delete process for resources in ARH.
+4. Once the object is uploaded, the solution will automatically handle the create/update/delete process for resources in ARH.
 
 ## Reference Architecture
 #### AWS Architecture
