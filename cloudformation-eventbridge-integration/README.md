@@ -1,5 +1,5 @@
-# Automate resilience assessments of your AWS CloudFormation stacks using AWS Resilience Hub and Amazon EventBridge
-This AWS CloudFormation template deploys a solution to automatically assess the resilience posture of new or updated CloudFormation stacks, and Terraform state files stored in AWS S3 bucket. The solution automatically creates an application in Resilience Hub and assesses it against the provided resiliency policies. The application owner receives a notification with their resilience assessment. 
+# Automate resilience assessments of your AWS CloudFormation Stacks/Terraform Statefiles using AWS Resilience Hub and Amazon EventBridge
+This AWS CloudFormation template deploys a solution to automatically assess the resilience posture of new or updated CloudFormation stacks, or Terraform state files stored in AWS S3 bucket. The solution automatically creates an application in Resilience Hub and assesses it against the provided resiliency policies. The application owner receives a notification with their resilience assessment. 
 
 This solution uses Amazon EventBridge to launch an AWS Step Functions workflow to orchestrate AWS Resilience Hub (ARH). Notification of detected drift and assessment failures are published to Amazon Simple Notification Service (SNS).
 
