@@ -1,6 +1,9 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-
+Parameters:
+  TerraformS3Bucket:
+    Type: String
+    Description: Enter the S3 bucket name containing the Terraform state file
 Resources:
   CustomEventBus:
     Type: AWS::Events::EventBus
@@ -94,6 +97,52 @@ Resources:
         - Id: 0
           Arn: !GetAtt CustomEventBus.Arn
           RoleArn: !GetAtt EventBridgeRole.Arn
+
+  SendToTFBusRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName: default
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - Object Created
+          - Object Deleted
+        detail:
+          bucket:
+            name:
+              - Ref: TerraformS3Bucket
+          object:
+            key:
+              - suffix: .tfstate
+      State: ENABLED
+      Targets:
+        - Id: 0
+          Arn: !GetAtt CustomEventBus.Arn
+          RoleArn: !GetAtt EventBridgeRole.Arn
+
+  TFStateChangeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName: !Ref CustomEventBus
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - Object Created
+          - Object Deleted
+        detail:
+          bucket:
+            name:
+              - Ref: TerraformS3Bucket
+          object:
+            key:
+              - suffix: .tfstate
+      State: ENABLED
+      Targets:
+        - Id: 0
+          Arn: !GetAtt ArhCfnStateMachine.Arn
+          RoleArn: !GetAtt EventBridgeToStepFunctionsRole.Arn
 
   ResiliencyPolicyNonCritical:
     Type: 'AWS::ResilienceHub::ResiliencyPolicy'
@@ -215,7 +264,7 @@ Resources:
         Comment: >-
           Create, update, or delete Resilience Hub applications in response to
           CloudFormation events
-        StartAt: DescribeStacks
+        StartAt: ProcessEventData
         States:
           Check Assessment Status:
             Choices:
@@ -224,6 +273,28 @@ Resources:
                 Variable: $.Assessments.Assessment.AssessmentStatus
             Default: Wait for Assessment
             Type: Choice
+          ProcessEventData:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters:
+              Payload.$: $
+              FunctionName: !Sub ${ProcessEventDataFunction.Arn}:$LATEST
+            Retry:
+              - ErrorEquals:
+                  - Lambda.ServiceException
+                  - Lambda.AWSLambdaException
+                  - Lambda.SdkClientException
+                  - Lambda.TooManyRequestsException
+                IntervalSeconds: 1
+                MaxAttempts: 3
+                BackoffRate: 2
+            ResultSelector:
+              Tags.$: $.Payload.tags
+              ArhAppName.$: $.Payload.arhAppName
+              ArhOperation.$: $.Payload.arhAppOperation
+              ArhSourceResource.$: $.Payload.resourcePath
+            Next: Create, Update, Delete
+            ResultPath: $.ArhPayload
           Check Import Status:
             Choices:
               - Next: PublishAppVersion
@@ -233,18 +304,17 @@ Resources:
             Type: Choice
           Create, Update, Delete:
             Choices:
-              - Comment: CREATE_COMPLETE
+              - Or:
+                  - StringEquals: UPDATE_COMPLETE
+                    Variable: $.ArhPayload.ArhOperation
+                  - StringEquals: CREATE_COMPLETE
+                    Variable: $.ArhPayload.ArhOperation
+                Comment: CREATE or UPDATE COMPLETED
                 Next: ForEach Tag
-                StringEquals: CREATE_COMPLETE
-                Variable: $.Stacks[0].StackStatus
-              - Comment: UPDATE_COMPLETE
-                Next: ForEach Tag
-                StringEquals: UPDATE_COMPLETE
-                Variable: $.Stacks[0].StackStatus
               - Comment: DELETE_COMPLETE
                 Next: ListApps (Delete)
                 StringEquals: DELETE_COMPLETE
-                Variable: $.Stacks[0].StackStatus
+                Variable: $.ArhPayload.ArhOperation
             Default: Fail
             Type: Choice
           Create/Update Successful:
@@ -253,12 +323,13 @@ Resources:
             Next: Update Tags
             Parameters:
               Description: DO NOT DELETE -- This application is managed by CloudFormation
-              Name.$: $.Stacks[0].StackName
+              Name.$: $.ArhPayload.ArhAppName
               PolicyArn.$: $.ForEachTag.PolicyArn
               EventSubscriptions.$: $.ForEachTag.Notify
             Resource: arn:aws:states:::aws-sdk:resiliencehub:createApp
             ResultPath: $.Apps
             Type: Task
+
           Delete Successful:
             Type: Succeed
           DeleteApp:
@@ -281,12 +352,6 @@ Resources:
             Resource: >-
               arn:aws:states:::aws-sdk:resiliencehub:describeDraftAppVersionResourcesImportStatus
             ResultPath: $.Import
-            Type: Task
-          DescribeStacks:
-            Next: Create, Update, Delete
-            Parameters:
-              StackName.$: $.detail.stack-id
-            Resource: arn:aws:states:::aws-sdk:cloudformation:describeStacks
             Type: Task
           Fail:
             Type: Fail
@@ -356,7 +421,7 @@ Resources:
                   Type: Task
                   ResultSelector:
                     PolicyArn.$: $.ResiliencyPolicies[0].PolicyArn
-            ItemsPath: $.Stacks[0].Tags
+            ItemsPath: $.ArhPayload.Tags
             Next: ListApps
             ResultPath: $.ForEachTag
             Type: Map
@@ -378,10 +443,27 @@ Resources:
             Default: DeleteApp
             Type: Choice
           ImportResourcesToDraftAppVersion:
+            Type: Choice
+            Choices:
+              - StringMatches: aws.cloudformation
+                Variable: $.source
+                Next: ImportResourcesToDraftAppVersion (CF)
+              - StringMatches: aws.s3
+                Variable: $.source
+                Next: ImportResourcesToDraftAppVersion (TF)                
+          ImportResourcesToDraftAppVersion (CF):
             Next: Wait for Import
             Parameters:
               AppArn.$: $.Apps.App.AppArn
-              SourceArns.$: States.Array($.Stacks[0].StackId)
+              SourceArns.$: States.Array($.ArhPayload.ArhSourceResource)
+            Resource: arn:aws:states:::aws-sdk:resiliencehub:importResourcesToDraftAppVersion
+            ResultPath: $.Import
+            Type: Task
+          ImportResourcesToDraftAppVersion (TF):
+            Next: Wait for Import
+            Parameters:
+              AppArn.$: $.Apps.App.AppArn
+              TerraformSources.$: States.Array(States.StringToJson(States.Format('\{"S3StateFileUrl":"{}"\}',$.ArhPayload.ArhSourceResource)))
             Resource: arn:aws:states:::aws-sdk:resiliencehub:importResourcesToDraftAppVersion
             ResultPath: $.Import
             Type: Task
@@ -395,14 +477,14 @@ Resources:
           ListApps:
             Next: UPDATE/CREATE
             Parameters:
-              Name.$: $.Stacks[0].StackName
+              Name.$: $.ArhPayload.ArhAppName
             Resource: arn:aws:states:::aws-sdk:resiliencehub:listApps
             ResultPath: $.Apps
             Type: Task
           ListApps (Delete):
             Next: If App Found (Delete)
             Parameters:
-              Name.$: $.Stacks[0].StackName
+              Name.$: $.ArhPayload.ArhAppName
             Resource: arn:aws:states:::aws-sdk:resiliencehub:listApps
             Type: Task
           PublishAppVersion:
@@ -425,7 +507,7 @@ Resources:
             Choices:
               - And:
                   - StringEquals: UPDATE_COMPLETE
-                    Variable: $.Stacks[0].StackStatus
+                    Variable: $.ArhPayload.ArhOperation
                   - IsPresent: true
                     Variable: $.Apps.AppSummaries[0]
                 Next: UpdateApp
@@ -467,7 +549,46 @@ Resources:
             Type: Wait
         TimeoutSeconds: 60      
       Role: !GetAtt ArhCfnStateMachineRole.Arn
-  
+
+  ProcessEventDataFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action: 
+                - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: AllowDescribeStacks
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - "cloudformation:DescribeStacks"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:*"
+        - PolicyName: AllowReadS3Tags
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - "s3:ListBucket"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${TerraformS3Bucket}"
+              - Effect: Allow
+                Action: 
+                  - "s3:GetObjectTagging"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${TerraformS3Bucket}/*"
+
   UpdateTagsFunctionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -494,7 +615,80 @@ Resources:
                   - "resiliencehub:UntagResource"
                 Resource:
                   - !Sub "arn:${AWS::Partition}:resiliencehub:${AWS::Region}:${AWS::AccountId}:*"
-  
+
+  ProcessEventDataFunction:
+    Type: AWS::Lambda::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "This function does not need to communicate with any resources within a customer VPC - only AWS services"
+    Properties:
+      Role: !GetAtt ProcessEventDataFunctionRole.Arn
+      Environment:
+        Variables:
+          SNS_TOPIC: blank
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+
+          s3_client = boto3.client("s3")
+          cfn_client = boto3.client("cloudformation")
+          def lambda_handler(event, context):
+            event_source = event["source"]
+            arhAppName = ""
+            resourcePath = ""
+            arhAppOperation=""
+            arh_app_tags = []
+            if event_source == "aws.s3":
+              try:
+                  bucket_name = event["detail"]["bucket"]["name"]
+                  object_key = event["detail"]["object"]["key"]
+                  #resilience hub application name - unique
+                  arhAppName = bucket_name + '-'+ object_key.replace("/","-").replace(".","-")
+                  resourcePath = 's3://'+bucket_name+'/'+object_key
+                  if event["detail"]["reason"] == 'DeleteObject':
+                    arhAppOperation = 'DELETE_COMPLETE'
+                  elif event["detail"]["reason"] == 'PutObject':
+                    arhAppOperation = 'UPDATE_COMPLETE'
+
+                  #get the tags for the state file
+                  tags = s3_client.get_object_tagging(
+                      Bucket = bucket_name,
+                      Key = object_key
+                  )
+                  arh_app_tags = tags["TagSet"]
+              except s3_client.exceptions.NoSuchKey as e:
+                  print("The error is: ",e)
+            elif event_source == "aws.cloudformation" :
+              try:
+                cfn_client.describe_stacks(StackName=event["detail"]["stack-id"])
+                cfn_stack_id = event["detail"]["stack-id"] 
+                cfn_client_response = cfn_client.describe_stacks(
+                    StackName = cfn_stack_id
+                )
+                #resilience hub application name - unique
+                if ("Stacks" in cfn_client_response and len(cfn_client_response["Stacks"]) > 0):
+                  arhAppName = cfn_client_response["Stacks"][0]["StackName"]
+                  arhAppOperation = cfn_client_response["Stacks"][0]["StackStatus"]
+                  arh_app_tags = cfn_client_response["Stacks"][0]["Tags"]
+                  resourcePath = cfn_client_response["Stacks"][0]["StackId"]
+              except Exception as e:
+                  print("The error is: ",e)
+            return {
+                'statusCode': 200,
+                'tags': arh_app_tags,
+                'arhAppName': arhAppName,
+                'arhAppOperation': arhAppOperation,
+                'resourcePath': resourcePath
+            }
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      ReservedConcurrentExecutions: 2
+      TracingConfig:
+        Mode: Active
+
   UpdateTagsFunction:
     Type: AWS::Lambda::Function
     Metadata:
@@ -517,30 +711,29 @@ Resources:
           def lambda_handler(event, context):
               # Get ARH app arn from event
               app_arn = event["Apps"]["App"]["AppArn"]
-              
               # Get list of tags from the event, reformat into key:value
               tags = {}
-              for t in event["Stacks"][0]["Tags"]:
-                  key = t["Key"]
-                  value = t["Value"]
-                  tags[key] = value
-              
-              try:
-                  # Check for existing tags, remove if present
-                  existing_tags = arh.list_tags_for_resource(resourceArn=app_arn)
-                  if len(existing_tags['tags']) > 0:
-                      arh.untag_resource(resourceArn=app_arn, tagKeys=list(existing_tags['tags'].keys()))
-                  
-                  # Don't update tags if none were listed in the event
-                  if len(tags) > 0:
-                      update_tags = arh.tag_resource(resourceArn=app_arn, tags=tags)
-              except Exception as e:
-                  print("The error is: ",e)
-              
-              return {
-                  'statusCode': 200,
-                  'body': "Current tags: {}".format(json.dumps(tags))
-              }
+              if "Tags" in event["ArhPayload"] and len(event["ArhPayload"]["Tags"]) > 0:
+                for t in event["ArhPayload"]["Tags"]:
+                    key = t["Key"]
+                    value = t["Value"]
+                    tags[key] = value
+                try:
+                    # Check for existing tags, remove if present
+                    existing_tags = arh.list_tags_for_resource(resourceArn=app_arn)
+                    if len(existing_tags['tags']) > 0:
+                        arh.untag_resource(resourceArn=app_arn, tagKeys=list(existing_tags['tags'].keys()))
+                    
+                    # Don't update tags if none were listed in the event
+                    if len(tags) > 0:
+                        update_tags = arh.tag_resource(resourceArn=app_arn, tags=tags)
+                except Exception as e:
+                    print("The error is: ",e)
+                
+                return {
+                    'statusCode': 200,
+                    'body': "Current tags: {}".format(json.dumps(tags))
+                }
       Handler: index.lambda_handler
       Runtime: python3.11
       ReservedConcurrentExecutions: 2
