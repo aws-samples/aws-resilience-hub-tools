@@ -48,7 +48,7 @@ Steps:
 #### AWS Architecture
 ![Architecture Image](architecture.png)
 #### AWS Step Functions Workflow
-![Step Functions Workflow](step-functions-workflow(withTF).png)
+![Step Functions Workflow](step-functions-workflow-with-tf.png)
 For CloudFormation stack, the above Step Function branches based off of the status of the stack:
 >CREATE_COMPLETE --> Create a new application in ARH
 >DELETE_COMPLETE --> Delete the application in ARH
