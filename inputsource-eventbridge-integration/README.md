@@ -13,7 +13,7 @@ The solution deploys five resiliency policies in ARH to check applications again
 
 ## Setup
 1. Navigate to the CloudFormation console in AWS
-2. Deploy `arh_cfn_eb_template.yaml`
+2. Deploy `arh_input_source_eb_template.yaml`
 
 ## How to use Solution
 #### Using CloudFormation stacks
