@@ -24,6 +24,7 @@ Steps:
 2. During the CloudFormation deployment, add the following tags: 
     1. **(Required)**`app_criticality`, value: STRING from a pre-formatted list from ARH tiers: Valid Values: `MissionCritical | Critical | Important | CoreServices | NonCritical`
     2. **(Optional)** `app_owner`, value: ARN of valid SNS Topic that will receive the resilience assessment notifications
+    3. **(Optional)** `app_name`, value: Name of the new or existing Resilience Hub application 
    
 ![Add Tags Image](add-tag.png)
 
@@ -37,6 +38,7 @@ Steps:
 3. During the object upload, add the following tags: 
     1. **(Required)**`app_criticality`, value: STRING from a pre-formatted list from ARH tiers: Valid Values: `MissionCritical | Critical | Important | CoreServices | NonCritical`
     2. **(Optional)** `app_owner`, value: ARN of valid SNS Topic that will receive the resilience assessment notification
+    3. **(Optional)** `app_name`, value: Name of the new or existing Resilience Hub application
 
 This will result an automatic creation or update to existing applications in ARH which notifies the application owner of any detected drift or assessment failures.
    
