@@ -272,7 +272,7 @@ Resources:
             Choices:
               - Next: Create/Update Successful
                 StringMatches: Success
-                Variable: $.Assessments.Assessment.AssessmentStatus
+                Variable: $.Assessment.AssessmentStatus
             Default: Wait for Assessment
             Type: Choice
           Check Import Status:
@@ -296,13 +296,13 @@ Resources:
                 Next: ForEach Tag
                 Or:
                   - StringEquals: UPDATE_COMPLETE
-                    Variable: $.ArhPayload.ArhOperation
+                    Variable: $.ArhPayload.SourceEventReceived
                   - StringEquals: CREATE_COMPLETE
-                    Variable: $.ArhPayload.ArhOperation
+                    Variable: $.ArhPayload.SourceEventReceived
               - Comment: DELETE_COMPLETE
                 Next: ListApps (Delete)
                 StringEquals: DELETE_COMPLETE
-                Variable: $.ArhPayload.ArhOperation
+                Variable: $.ArhPayload.SourceEventReceived
             Default: Fail
             Type: Choice
           Create/Update Successful:
@@ -312,7 +312,7 @@ Resources:
             Parameters:
               Description: DO NOT DELETE -- This application is managed by CloudFormation
               EventSubscriptions.$: $.ForEachTag.Notify
-              Name.$: $.ArhPayload.ArhAppName
+              Name.$: $.ArhPayload.ArhApplicationName
               PolicyArn.$: $.ForEachTag.PolicyArn[0].PolicyArn
             Resource: arn:aws:states:::aws-sdk:resiliencehub:createApp
             ResultPath: $.Apps
@@ -321,10 +321,10 @@ Resources:
             Choices:
               - Next: Delete App Input Source (CF)
                 StringMatches: aws.cloudformation
-                Variable: $.source
+                Variable: $.ArhPayload.ArhAppInputSourceType
               - Next: Delete App Input Source (TF)
                 StringMatches: aws.s3
-                Variable: $.source
+                Variable: $.ArhPayload.ArhAppInputSourceType
             Type: Choice
           Delete App Input Source (CF):
             Catch:
@@ -335,7 +335,7 @@ Resources:
             Next: List App Input Sources
             Parameters:
               AppArn.$: $.Apps.AppSummaries[0].AppArn
-              SourceArn.$: $.ArhPayload.ArhSourceResource
+              SourceArn.$: $.ArhPayload.ArhAppInputSource
             Resource: arn:aws:states:::aws-sdk:resiliencehub:deleteAppInputSource
             ResultPath: $.DeletedApp
             Type: Task
@@ -349,7 +349,7 @@ Resources:
             Parameters:
               AppArn.$: $.Apps.AppSummaries[0].AppArn
               TerraformSource.$: >-
-                States.StringToJson(States.Format('\{"S3StateFileUrl":"{}"\}',$.ArhPayload.ArhSourceResource))
+                States.StringToJson(States.Format('\{"S3StateFileUrl":"{}"\}',$.ArhPayload.ArhAppInputSource))
             Resource: arn:aws:states:::aws-sdk:resiliencehub:deleteAppInputSource
             ResultPath: $.DeletedApp
             Type: Task
@@ -364,9 +364,8 @@ Resources:
           DescribeAppAssessment:
             Next: Check Assessment Status
             Parameters:
-              AssessmentArn.$: $.Assessments.Assessment.AssessmentArn
+              AssessmentArn.$: $.Assessment.AssessmentArn
             Resource: arn:aws:states:::aws-sdk:resiliencehub:describeAppAssessment
-            ResultPath: $.Assessments
             Type: Task
           DescribeDraftAppVersionResourcesImportStatus:
             Next: Check Import Status
@@ -476,16 +475,16 @@ Resources:
             Choices:
               - Next: ImportResourcesToDraftAppVersion (CF)
                 StringMatches: aws.cloudformation
-                Variable: $.source
+                Variable: $.ArhPayload.ArhAppInputSourceType
               - Next: ImportResourcesToDraftAppVersion (TF)
                 StringMatches: aws.s3
-                Variable: $.source
+                Variable: $.ArhPayload.ArhAppInputSourceType
             Type: Choice
           ImportResourcesToDraftAppVersion (CF):
             Next: Wait for Import
             Parameters:
               AppArn.$: $.Apps.App.AppArn
-              SourceArns.$: States.Array($.ArhPayload.ArhSourceResource)
+              SourceArns.$: States.Array($.ArhPayload.ArhAppInputSource)
             Resource: arn:aws:states:::aws-sdk:resiliencehub:importResourcesToDraftAppVersion
             ResultPath: $.Import
             Type: Task
@@ -494,7 +493,7 @@ Resources:
             Parameters:
               AppArn.$: $.Apps.App.AppArn
               TerraformSources.$: >-
-                States.Array(States.StringToJson(States.Format('\{"S3StateFileUrl":"{}"\}',$.ArhPayload.ArhSourceResource)))
+                States.Array(States.StringToJson(States.Format('\{"S3StateFileUrl":"{}"\}',$.ArhPayload.ArhAppInputSource)))
             Resource: arn:aws:states:::aws-sdk:resiliencehub:importResourcesToDraftAppVersion
             ResultPath: $.Import
             Type: Task
@@ -524,30 +523,25 @@ Resources:
           ListApps:
             Next: UPDATE/CREATE
             Parameters:
-              Name.$: $.ArhPayload.ArhAppName
+              Name.$: $.ArhPayload.ArhApplicationName
             Resource: arn:aws:states:::aws-sdk:resiliencehub:listApps
             ResultPath: $.Apps
             Type: Task
           ListApps (Delete):
             Next: If App Found (Delete)
             Parameters:
-              Name.$: $.ArhPayload.ArhAppName
+              Name.$: $.ArhPayload.ArhApplicationName
             Resource: arn:aws:states:::aws-sdk:resiliencehub:listApps
             ResultPath: $.Apps
             Type: Task
           ProcessEventData:
             Next: Create, Update, Delete
             Parameters:
-              FunctionName: >-
-                arn:aws:lambda:us-west-2:210004577301:function:TestTfS3EventBridgeIntegr-ProcessEventDataFunction-DYBbItCXkp0r:$LATEST
+              FunctionName: !Sub ${ProcessEventDataFunction.Arn}:$LATEST
               Payload.$: $
             Resource: arn:aws:states:::lambda:invoke
-            ResultPath: $.ArhPayload
             ResultSelector:
-              ArhAppName.$: $.Payload.arhAppName
-              ArhOperation.$: $.Payload.arhAppOperation
-              ArhSourceResource.$: $.Payload.resourcePath
-              Tags.$: $.Payload.tags
+              ArhPayload.$: $.Payload
             Retry:
               - BackoffRate: 2
                 ErrorEquals:
@@ -563,16 +557,15 @@ Resources:
             Parameters:
               AppArn.$: $.AppArn
             Resource: arn:aws:states:::aws-sdk:resiliencehub:publishAppVersion
-            ResultPath: $.App
+            ResultPath: null
             Type: Task
           StartAppAssessment:
             Next: Wait for Assessment
             Parameters:
-              AppArn.$: $.App.AppArn
+              AppArn.$: $.AppArn
               AppVersion: release
               AssessmentName.$: States.Format('Assessment-report-{}', States.UUID())
             Resource: arn:aws:states:::aws-sdk:resiliencehub:startAppAssessment
-            ResultPath: $.Assessments
             Type: Task
           UPDATE/CREATE:
             Choices:
@@ -584,8 +577,7 @@ Resources:
           Update Tags:
             Next: ImportResourcesToDraftAppVersion
             Parameters:
-              FunctionName: >-
-                arn:aws:lambda:us-west-2:210004577301:function:TestTfS3EventBridgeIntegration-UpdateTagsFunction-acmyHtjvVESB:$LATEST
+              FunctionName: !Sub ${UpdateTagsFunction.Arn}:$LATEST
               Payload.$: $
             Resource: arn:aws:states:::lambda:invoke
             ResultPath: null
@@ -753,10 +745,11 @@ Resources:
               print("The error is: ",e)
             return {
                 'statusCode': 200,
-                'tags': arh_app_tags,
-                'arhAppName': arhAppName,
-                'arhAppOperation': arhAppOperation,
-                'resourcePath': resourcePath
+                'ArhApplicationName': arhAppName,
+                'ArhAppInputSourceType': event_source,
+                'ArhAppInputSource': resourcePath,
+                'SourceEventReceived': arhAppOperation,
+                'Tags': arh_app_tags
             }
       Handler: index.lambda_handler
       Runtime: python3.12
