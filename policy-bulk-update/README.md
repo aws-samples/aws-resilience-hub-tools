@@ -12,4 +12,4 @@ The script takes the below as input:
     b. Filename with app ARNs per line
 3. Optional parameter: --assessmentSchedule with valid values Disabled | Daily
 
-Script will call Resilience Hub API [UpdateApp] (https://docs.aws.amazon.com/resilience-hub/latest/APIReference/API_UpdateApp.html) to update policy of every given Resilience Hub application and optionally turn on/off daily assessments.
+Script will call Resilience Hub API [UpdateApp](https://docs.aws.amazon.com/resilience-hub/latest/APIReference/API_UpdateApp.html) to update policy of every given Resilience Hub application and optionally turn on/off daily assessments.
