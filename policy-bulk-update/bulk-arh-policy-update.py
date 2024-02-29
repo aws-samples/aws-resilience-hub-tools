@@ -1,7 +1,7 @@
 '''  Bulk policy update to multiple Resilience Hub applications
     Inputs: 
         -p, --policy-arn: ARN of the Resilience Hub Policy
-        -a, --target-app-arns: Target ARH App ARNs seperated by comma (,)
+        -a, --target-app-arns: Target ARH App ARNs seperated by comma (,) OR
         -f, --target-app-file: File containing the ARH App ARNs - one per line
         -s, --schedule: Schedule for the policy
         -v, --verbose: Verbose output
