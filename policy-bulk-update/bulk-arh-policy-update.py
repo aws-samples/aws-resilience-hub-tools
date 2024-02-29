@@ -1,8 +1,8 @@
 '''  Bulk policy update to multiple Resilience Hub applications
     Inputs: 
         -p, --policy-arn: ARN of the Resilience Hub Policy
-        -a, --target-app-arns: Target ARH App ARNs
-        -f, --target-app-file: File containing the ARH App ARNs
+        -a, --target-app-arns: Target ARH App ARNs seperated by comma (,)
+        -f, --target-app-file: File containing the ARH App ARNs - one per line
         -s, --schedule: Schedule for the policy
         -v, --verbose: Verbose output
 '''
@@ -51,8 +51,8 @@ if __name__ == "__main__":
 
     # You need either the list of app ARNs or the file containing the list of app ARNs
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("-a", "--target-app-arns", type=str, help="Target ARH App ARNs")
-    group.add_argument("-f", "--target-app-file", type=str, help="File containing the ARH App ARNs")
+    group.add_argument("-a", "--target-app-arns", type=str, help="Target ARH App ARNs seperated by comma")
+    group.add_argument("-f", "--target-app-file", type=str, help="File containing the ARH App ARNs - one per line")
 
     parser.add_argument("-s", "--schedule", type=str,
         help="Assesmant Schedule - valid values Disabled|Daily",choices=['Disabled', 'Daily'],)
