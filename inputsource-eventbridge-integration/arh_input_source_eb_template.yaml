@@ -254,6 +254,8 @@ Resources:
                   - "resiliencehub:StartAppAssessment"
                   - "resiliencehub:TagResource"
                   - "resiliencehub:UpdateApp"
+                  - "resiliencehub:DeleteAppInputSource"
+                  - "resiliencehub:ListAppInputSources"
                 Resource:
                   - !Sub "arn:${AWS::Partition}:resiliencehub:${AWS::Region}:${AWS::AccountId}:*"
 
@@ -270,51 +272,37 @@ Resources:
             Choices:
               - Next: Create/Update Successful
                 StringMatches: Success
-                Variable: $.Assessments.Assessment.AssessmentStatus
+                Variable: $.Assessment.AssessmentStatus
             Default: Wait for Assessment
             Type: Choice
-          ProcessEventData:
-            Type: Task
-            Resource: arn:aws:states:::lambda:invoke
-            Parameters:
-              Payload.$: $
-              FunctionName: !Sub ${ProcessEventDataFunction.Arn}:$LATEST
-            Retry:
-              - ErrorEquals:
-                  - Lambda.ServiceException
-                  - Lambda.AWSLambdaException
-                  - Lambda.SdkClientException
-                  - Lambda.TooManyRequestsException
-                IntervalSeconds: 1
-                MaxAttempts: 3
-                BackoffRate: 2
-            ResultSelector:
-              Tags.$: $.Payload.tags
-              ArhAppName.$: $.Payload.arhAppName
-              ArhOperation.$: $.Payload.arhAppOperation
-              ArhSourceResource.$: $.Payload.resourcePath
-            Next: Create, Update, Delete
-            ResultPath: $.ArhPayload
           Check Import Status:
             Choices:
               - Next: PublishAppVersion
                 StringMatches: Success
                 Variable: $.Import.Status
             Default: Wait for Import
+            OutputPath: $.Apps.App
+            Type: Choice
+          Check Policy Tag:
+            Choices:
+              - IsPresent: true
+                Next: ListApps
+                Variable: $.ForEachTag.PolicyArn[0]
+            Default: Create/Update Successful
             Type: Choice
           Create, Update, Delete:
             Choices:
-              - Or:
-                  - StringEquals: UPDATE_COMPLETE
-                    Variable: $.ArhPayload.ArhOperation
-                  - StringEquals: CREATE_COMPLETE
-                    Variable: $.ArhPayload.ArhOperation
-                Comment: CREATE or UPDATE COMPLETED
+              - Comment: CREATE or UPDATE COMPLETED
                 Next: ForEach Tag
+                Or:
+                  - StringEquals: UPDATE_COMPLETE
+                    Variable: $.ArhPayload.SourceEventReceived
+                  - StringEquals: CREATE_COMPLETE
+                    Variable: $.ArhPayload.SourceEventReceived
               - Comment: DELETE_COMPLETE
                 Next: ListApps (Delete)
                 StringEquals: DELETE_COMPLETE
-                Variable: $.ArhPayload.ArhOperation
+                Variable: $.ArhPayload.SourceEventReceived
             Default: Fail
             Type: Choice
           Create/Update Successful:
@@ -323,32 +311,66 @@ Resources:
             Next: Update Tags
             Parameters:
               Description: DO NOT DELETE -- This application is managed by CloudFormation
-              Name.$: $.ArhPayload.ArhAppName
-              PolicyArn.$: $.ForEachTag.PolicyArn
               EventSubscriptions.$: $.ForEachTag.Notify
+              Name.$: $.ArhPayload.ArhApplicationName
+              PolicyArn.$: $.ForEachTag.PolicyArn[0].PolicyArn
             Resource: arn:aws:states:::aws-sdk:resiliencehub:createApp
             ResultPath: $.Apps
             Type: Task
-
+          Delete App Input Source:
+            Choices:
+              - Next: Delete App Input Source (CF)
+                StringMatches: aws.cloudformation
+                Variable: $.ArhPayload.ArhAppInputSourceType
+              - Next: Delete App Input Source (TF)
+                StringMatches: aws.s3
+                Variable: $.ArhPayload.ArhAppInputSourceType
+            Type: Choice
+          Delete App Input Source (CF):
+            Catch:
+              - ErrorEquals:
+                  - Resiliencehub.ResourceNotFoundException
+                Next: List App Input Sources
+                ResultPath: null
+            Next: List App Input Sources
+            Parameters:
+              AppArn.$: $.Apps.AppSummaries[0].AppArn
+              SourceArn.$: $.ArhPayload.ArhAppInputSource
+            Resource: arn:aws:states:::aws-sdk:resiliencehub:deleteAppInputSource
+            ResultPath: $.DeletedApp
+            Type: Task
+          Delete App Input Source (TF):
+            Catch:
+              - ErrorEquals:
+                  - Resiliencehub.ResourceNotFoundException
+                Next: List App Input Sources
+                ResultPath: null
+            Next: List App Input Sources
+            Parameters:
+              AppArn.$: $.Apps.AppSummaries[0].AppArn
+              TerraformSource.$: >-
+                States.StringToJson(States.Format('\{"S3StateFileUrl":"{}"\}',$.ArhPayload.ArhAppInputSource))
+            Resource: arn:aws:states:::aws-sdk:resiliencehub:deleteAppInputSource
+            ResultPath: $.DeletedApp
+            Type: Task
           Delete Successful:
             Type: Succeed
           DeleteApp:
             Next: Delete Successful
             Parameters:
-              AppArn.$: $.AppSummaries[0].AppArn
+              AppArn.$: $.AppArn
             Resource: arn:aws:states:::aws-sdk:resiliencehub:deleteApp
             Type: Task
           DescribeAppAssessment:
             Next: Check Assessment Status
             Parameters:
-              AssessmentArn.$: $.Assessments.Assessment.AssessmentArn
+              AssessmentArn.$: $.Assessment.AssessmentArn
             Resource: arn:aws:states:::aws-sdk:resiliencehub:describeAppAssessment
-            ResultPath: $.Assessments
             Type: Task
           DescribeDraftAppVersionResourcesImportStatus:
             Next: Check Import Status
             Parameters:
-              AppArn.$: $.Import.AppArn
+              AppArn.$: $.Apps.App.AppArn
             Resource: >-
               arn:aws:states:::aws-sdk:resiliencehub:describeDraftAppVersionResourcesImportStatus
             ResultPath: $.Import
@@ -367,6 +389,12 @@ Resources:
                     AssessmentArn.$: $.AssessmentArn
                   Resource: arn:aws:states:::aws-sdk:resiliencehub:deleteAppAssessment
                   ResultPath: null
+                  Retry:
+                    - BackoffRate: 2
+                      ErrorEquals:
+                        - Resiliencehub.ResiliencehubException
+                      IntervalSeconds: 10
+                      MaxAttempts: 3
                   Type: Task
             ItemsPath: $.result.AssessmentSummaries
             Next: DeleteApp
@@ -386,53 +414,54 @@ Resources:
                     - Next: Format Notification Types
                       StringMatches: app_owner
                       Variable: $.Key
-                  Type: Choice
                   Default: Pass
-                Pass:
-                  Type: Pass
-                  End: true
+                  Type: Choice
                 Format Notification Types:
-                  Type: Parallel
                   Branches:
                     - StartAt: Type 1
                       States:
                         Type 1:
-                          Type: Pass
+                          End: true
                           Parameters:
                             EventType: DriftDetected
                             Name: DriftDetected
                             SnsTopicArn.$: $.Value
-                          End: true
+                          Type: Pass
                     - StartAt: Type 2
                       States:
                         Type 2:
-                          Type: Pass
                           End: true
                           Parameters:
                             EventType: ScheduledAssessmentFailure
                             Name: ScheduledAssessmentFailure
                             SnsTopicArn.$: $.Value
+                          Type: Pass
                   End: true
+                  Type: Parallel
                 ListResiliencyPolicies:
                   End: true
                   Parameters:
                     PolicyName.$: $.Value
                   Resource: arn:aws:states:::aws-sdk:resiliencehub:listResiliencyPolicies
-                  Type: Task
                   ResultSelector:
                     PolicyArn.$: $.ResiliencyPolicies[0].PolicyArn
+                  Type: Task
+                Pass:
+                  End: true
+                  Type: Pass
             ItemsPath: $.ArhPayload.Tags
-            Next: ListApps
+            Next: Check Policy Tag
             ResultPath: $.ForEachTag
-            Type: Map
             ResultSelector:
-              PolicyArn.$: $.[0].PolicyArn
+              ArhAppName.$: $..[?(@.ArhAppName)]
               Notify.$: $..[?(@.EventType)]
+              PolicyArn.$: $..[?(@.PolicyArn)]
+            Type: Map
           If App Found (Delete):
             Choices:
               - IsPresent: true
-                Next: ListAppAssessments
-                Variable: $.AppSummaries[0]
+                Next: Delete App Input Source
+                Variable: $.Apps.AppSummaries[0]
             Default: Delete Successful
             Type: Choice
           If Assessment(s) Found:
@@ -443,19 +472,19 @@ Resources:
             Default: DeleteApp
             Type: Choice
           ImportResourcesToDraftAppVersion:
-            Type: Choice
             Choices:
-              - StringMatches: aws.cloudformation
-                Variable: $.source
-                Next: ImportResourcesToDraftAppVersion (CF)
-              - StringMatches: aws.s3
-                Variable: $.source
-                Next: ImportResourcesToDraftAppVersion (TF)                
+              - Next: ImportResourcesToDraftAppVersion (CF)
+                StringMatches: aws.cloudformation
+                Variable: $.ArhPayload.ArhAppInputSourceType
+              - Next: ImportResourcesToDraftAppVersion (TF)
+                StringMatches: aws.s3
+                Variable: $.ArhPayload.ArhAppInputSourceType
+            Type: Choice
           ImportResourcesToDraftAppVersion (CF):
             Next: Wait for Import
             Parameters:
               AppArn.$: $.Apps.App.AppArn
-              SourceArns.$: States.Array($.ArhPayload.ArhSourceResource)
+              SourceArns.$: States.Array($.ArhPayload.ArhAppInputSource)
             Resource: arn:aws:states:::aws-sdk:resiliencehub:importResourcesToDraftAppVersion
             ResultPath: $.Import
             Type: Task
@@ -463,82 +492,114 @@ Resources:
             Next: Wait for Import
             Parameters:
               AppArn.$: $.Apps.App.AppArn
-              TerraformSources.$: States.Array(States.StringToJson(States.Format('\{"S3StateFileUrl":"{}"\}',$.ArhPayload.ArhSourceResource)))
+              TerraformSources.$: >-
+                States.Array(States.StringToJson(States.Format('\{"S3StateFileUrl":"{}"\}',$.ArhPayload.ArhAppInputSource)))
             Resource: arn:aws:states:::aws-sdk:resiliencehub:importResourcesToDraftAppVersion
             ResultPath: $.Import
+            Type: Task
+          Input Sources Found:
+            Choices:
+              - IsPresent: true
+                Next: PublishAppVersion
+                Variable: $.App.Sources.AppInputSources[0].ImportType
+            Default: ListAppAssessments
+            OutputPath: $.Apps.AppSummaries[0]
+            Type: Choice
+          List App Input Sources:
+            Next: Input Sources Found
+            Parameters:
+              AppArn.$: $.Apps.AppSummaries[0].AppArn
+              AppVersion: draft
+            Resource: arn:aws:states:::aws-sdk:resiliencehub:listAppInputSources
+            ResultPath: $.App.Sources
             Type: Task
           ListAppAssessments:
             Next: If Assessment(s) Found
             Parameters:
-              AppArn.$: $.AppSummaries[0].AppArn
+              AppArn.$: $.AppArn
             Resource: arn:aws:states:::aws-sdk:resiliencehub:listAppAssessments
             ResultPath: $.result
             Type: Task
           ListApps:
             Next: UPDATE/CREATE
             Parameters:
-              Name.$: $.ArhPayload.ArhAppName
+              Name.$: $.ArhPayload.ArhApplicationName
             Resource: arn:aws:states:::aws-sdk:resiliencehub:listApps
             ResultPath: $.Apps
             Type: Task
           ListApps (Delete):
             Next: If App Found (Delete)
             Parameters:
-              Name.$: $.ArhPayload.ArhAppName
+              Name.$: $.ArhPayload.ArhApplicationName
             Resource: arn:aws:states:::aws-sdk:resiliencehub:listApps
-            Type: Task
-          PublishAppVersion:
-            Next: StartAppAssessment
-            Parameters:
-              AppArn.$: $.Import.AppArn
-            Resource: arn:aws:states:::aws-sdk:resiliencehub:publishAppVersion
-            ResultPath: $.App
-            Type: Task
-          StartAppAssessment:
-            Next: Wait for Assessment
-            Parameters:
-              AppArn.$: $.App.AppArn
-              AppVersion: release
-              AssessmentName.$: States.Format('Assessment-report-{}', States.UUID())
-            Resource: arn:aws:states:::aws-sdk:resiliencehub:startAppAssessment
-            ResultPath: $.Assessments
-            Type: Task
-          UPDATE/CREATE:
-            Choices:
-              - And:
-                  - StringEquals: UPDATE_COMPLETE
-                    Variable: $.ArhPayload.ArhOperation
-                  - IsPresent: true
-                    Variable: $.Apps.AppSummaries[0]
-                Next: UpdateApp
-            Default: CreateApp
-            Type: Choice
-          UpdateApp:
-            Next: Update Tags
-            Parameters:
-              AppArn.$: $.Apps.AppSummaries[0].AppArn
-              PolicyArn.$: $.ForEachTag.PolicyArn
-              EventSubscriptions.$: $.ForEachTag.Notify
-            Resource: arn:aws:states:::aws-sdk:resiliencehub:updateApp
             ResultPath: $.Apps
             Type: Task
-          Update Tags:
-            Type: Task
-            Resource: arn:aws:states:::lambda:invoke
+          ProcessEventData:
+            Next: Create, Update, Delete
             Parameters:
+              FunctionName: !Sub ${ProcessEventDataFunction.Arn}:$LATEST
               Payload.$: $
-              FunctionName: !Sub ${UpdateTagsFunction.Arn}:$LATEST
+            Resource: arn:aws:states:::lambda:invoke
+            ResultSelector:
+              ArhPayload.$: $.Payload
             Retry:
-              - ErrorEquals:
+              - BackoffRate: 2
+                ErrorEquals:
                   - Lambda.ServiceException
                   - Lambda.AWSLambdaException
                   - Lambda.SdkClientException
                   - Lambda.TooManyRequestsException
                 IntervalSeconds: 1
                 MaxAttempts: 3
-                BackoffRate: 2
-            Next: ImportResourcesToDraftAppVersion
+            Type: Task
+          PublishAppVersion:
+            Next: StartAppAssessment
+            Parameters:
+              AppArn.$: $.AppArn
+            Resource: arn:aws:states:::aws-sdk:resiliencehub:publishAppVersion
             ResultPath: null
+            Type: Task
+          StartAppAssessment:
+            Next: Wait for Assessment
+            Parameters:
+              AppArn.$: $.AppArn
+              AppVersion: release
+              AssessmentName.$: States.Format('Assessment-report-{}', States.UUID())
+            Resource: arn:aws:states:::aws-sdk:resiliencehub:startAppAssessment
+            Type: Task
+          UPDATE/CREATE:
+            Choices:
+              - IsPresent: true
+                Next: UpdateApp
+                Variable: $.Apps.AppSummaries[0]
+            Default: CreateApp
+            Type: Choice
+          Update Tags:
+            Next: ImportResourcesToDraftAppVersion
+            Parameters:
+              FunctionName: !Sub ${UpdateTagsFunction.Arn}:$LATEST
+              Payload.$: $
+            Resource: arn:aws:states:::lambda:invoke
+            ResultPath: null
+            Retry:
+              - BackoffRate: 2
+                ErrorEquals:
+                  - Lambda.ServiceException
+                  - Lambda.AWSLambdaException
+                  - Lambda.SdkClientException
+                  - Lambda.TooManyRequestsException
+                IntervalSeconds: 1
+                MaxAttempts: 3
+            Type: Task
+          UpdateApp:
+            Next: Update Tags
+            Parameters:
+              AppArn.$: $.Apps.AppSummaries[0].AppArn
+              EventSubscriptions.$: $.ForEachTag.Notify
+              PolicyArn.$: $.ForEachTag.PolicyArn[0].PolicyArn
+            Resource: arn:aws:states:::aws-sdk:resiliencehub:updateApp
+            ResultPath: $.Apps
+            Type: Task
           Wait for Assessment:
             Next: DescribeAppAssessment
             Seconds: 5
@@ -547,7 +608,7 @@ Resources:
             Next: DescribeDraftAppVersionResourcesImportStatus
             Seconds: 5
             Type: Wait
-        TimeoutSeconds: 60      
+        TimeoutSeconds: 120
       Role: !GetAtt ArhCfnStateMachineRole.Arn
 
   ProcessEventDataFunctionRole:
@@ -676,12 +737,19 @@ Resources:
                   resourcePath = cfn_client_response["Stacks"][0]["StackId"]
               except Exception as e:
                   print("The error is: ",e)
+            try:
+              arhAppNameTemp = [tag['Value'] for tag in arh_app_tags if tag['Key'] == 'app_name']
+              if len(arhAppNameTemp) == 1:
+                arhAppName = arhAppNameTemp[0]
+            except KeyError as e:
+              print("The error is: ",e)
             return {
                 'statusCode': 200,
-                'tags': arh_app_tags,
-                'arhAppName': arhAppName,
-                'arhAppOperation': arhAppOperation,
-                'resourcePath': resourcePath
+                'ArhApplicationName': arhAppName,
+                'ArhAppInputSourceType': event_source,
+                'ArhAppInputSource': resourcePath,
+                'SourceEventReceived': arhAppOperation,
+                'Tags': arh_app_tags
             }
       Handler: index.lambda_handler
       Runtime: python3.12
