@@ -24,7 +24,7 @@ Steps:
 2. During the CloudFormation deployment, add the following tags: 
     1. **(Required)**`app_criticality`, value: STRING from a pre-formatted list from ARH tiers: Valid Values: `MissionCritical | Critical | Important | CoreServices | NonCritical`
     2. **(Optional)** `app_owner`, value: ARN of valid SNS Topic that will receive the resilience assessment notifications
-    3. **(Optional)** `app_name`, value: Name of the new or existing Resilience Hub application 
+    3. **(Required)** `app_name`, value: Name of the new or existing Resilience Hub application 
    
 ![Add Tags Image](add-tag.png)
 
@@ -38,7 +38,7 @@ Steps:
 3. During the object upload, add the following tags: 
     1. **(Required)**`app_criticality`, value: STRING from a pre-formatted list from ARH tiers: Valid Values: `MissionCritical | Critical | Important | CoreServices | NonCritical`
     2. **(Optional)** `app_owner`, value: ARN of valid SNS Topic that will receive the resilience assessment notification
-    3. **(Optional)** `app_name`, value: Name of the new or existing Resilience Hub application
+    3. **(Required)** `app_name`, value: Name of the new or existing Resilience Hub application
 
 This will result an automatic creation or update to existing applications in ARH which notifies the application owner of any detected drift or assessment failures.
    
@@ -63,8 +63,8 @@ For Terraform state file stored in S3 bucket, the Step Function branches off off
 
 ## Important Notes
 #### CloudFormation Stacks
-- Deleting a template that was deployed with the tag will also result in the application created in ARH being deleted as well.
-- To import existing stacks into ARH, update the stack and add the `app_criticality` tag.
+- Deleting a template that was deployed with the mandatory tags will also result in the application created in ARH being deleted as well.
+- To import existing stacks into ARH, update the stack and add the `app_name` and `app_criticality` tags.
 #### Terraform state file in S3 bucket
-- Deleting an object with the `app_criticality` tag will also result in the application created in ARH being deleted as well.
-- To import existing Terraform state files into ARH, re-upload the object and add the `app_criticality` tag.
+- Deleting an object with the mandatory tags will also result in the application created in ARH being deleted as well.
+- To import existing Terraform state files into ARH, re-upload the object and add the `app_name` and `app_criticality` tags.
