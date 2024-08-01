@@ -283,11 +283,15 @@ Resources:
             Default: Wait for Import
             OutputPath: $.Apps.App
             Type: Choice
-          Check Policy Tag:
+          Check Mandatory Tags:
             Choices:
-              - IsPresent: true
+              - Comment: Check if both Policy and name tags are present
                 Next: ListApps
-                Variable: $.ForEachTag.PolicyArn[0]
+                And:
+                  - IsPresent: true
+                    Variable: $.ForEachTag.PolicyArn[0]
+                  - IsNull: false
+                    Variable: $.ArhPayload.ArhApplicationName
             Default: Create/Update Successful
             Type: Choice
           Create, Update, Delete:
@@ -450,10 +454,9 @@ Resources:
                   End: true
                   Type: Pass
             ItemsPath: $.ArhPayload.Tags
-            Next: Check Policy Tag
+            Next: Check Mandatory Tags
             ResultPath: $.ForEachTag
             ResultSelector:
-              ArhAppName.$: $..[?(@.ArhAppName)]
               Notify.$: $..[?(@.EventType)]
               PolicyArn.$: $..[?(@.PolicyArn)]
             Type: Map
@@ -698,7 +701,7 @@ Resources:
           cfn_client = boto3.client("cloudformation")
           def lambda_handler(event, context):
             event_source = event["source"]
-            arhAppName = ""
+            arhAppName = None
             resourcePath = ""
             arhAppOperation=""
             arh_app_tags = []
@@ -706,8 +709,6 @@ Resources:
               try:
                   bucket_name = event["detail"]["bucket"]["name"]
                   object_key = event["detail"]["object"]["key"]
-                  #resilience hub application name - unique
-                  arhAppName = bucket_name + '-'+ object_key.replace("/","-").replace(".","-")
                   resourcePath = 's3://'+bucket_name+'/'+object_key
                   if event["detail"]["reason"] == 'DeleteObject':
                     arhAppOperation = 'DELETE_COMPLETE'
@@ -729,9 +730,8 @@ Resources:
                 cfn_client_response = cfn_client.describe_stacks(
                     StackName = cfn_stack_id
                 )
-                #resilience hub application name - unique
+                
                 if ("Stacks" in cfn_client_response and len(cfn_client_response["Stacks"]) > 0):
-                  arhAppName = cfn_client_response["Stacks"][0]["StackName"]
                   arhAppOperation = cfn_client_response["Stacks"][0]["StackStatus"]
                   arh_app_tags = cfn_client_response["Stacks"][0]["Tags"]
                   resourcePath = cfn_client_response["Stacks"][0]["StackId"]
