@@ -1,1 +1,15 @@
 .DS_Store
+# CDK asset staging directory
+.cdk.staging
+cdk.out/
+
+# CDK context file
+cdk.context.json
+node_nodules/
+cdk.out/
+/bin/*.js
+/lib/*.js
+/test/*.js
+bin/*.d.ts
+lib/*.d.ts
+test/*.d.ts
