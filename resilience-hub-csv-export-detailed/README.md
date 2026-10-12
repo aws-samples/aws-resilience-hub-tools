@@ -7,8 +7,10 @@ Export assessment results for all applications defined within AWS Resilience Hub
 Run [csv-generator.py](./csv-generator.py) in an environment that includes permissions to make API calls to Resilience Hub. The environment also needs to have the [AWS SDK for Python (Boto3)](https://aws.amazon.com/sdk-for-python/) installed.
 
 ```
-python csv-generator.py
+python3 csv-generator.py
 ```
+
+On Windows, use `python csv-generator.py`.
 
 ## Output
 

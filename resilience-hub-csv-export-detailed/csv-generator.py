@@ -1,5 +1,7 @@
+#!/usr/bin/env python3
 import boto3
 import csv
+from botocore.exceptions import ClientError, EndpointConnectionError
 from datetime import datetime
 
 def seconds_to_readable(seconds):
@@ -24,18 +26,22 @@ def seconds_to_readable(seconds):
     
     return " ".join(parts)
 
+def to_points(score):
+    """Convert a 0-1 score from the API to points, e.g. 0.57 -> 57 (int(0.57 * 100) would give 56)"""
+    return int(round(score * 100, 6))
+
 # Get AWS account number
 sts = boto3.client('sts')
 account_id = sts.get_caller_identity()['Account']
 
-# Generate timestamp in mm/dd/yy-HH:MM format
-timestamp = datetime.now().strftime("%m-%d-%y-%H:%M")
+# Generate timestamp in mm-dd-yy-HH_MM format (no ":" so the file name is valid on Windows)
+timestamp = datetime.now().strftime("%m-%d-%y-%H_%M")
 
 # Create dynamic filename
 output_filename = f'resilience-report-{account_id}-{timestamp}.csv'
 
-# Get list of regions
-ec2 = boto3.client('ec2')
+# Get list of regions (fall back to us-east-1 if no default region is configured)
+ec2 = boto3.client('ec2', region_name=boto3.session.Session().region_name or 'us-east-1')
 regions = []
 region_details = ec2.describe_regions()['Regions']
 for region_detail in region_details:
@@ -51,15 +57,19 @@ for region in regions:
     try:
         arh = boto3.client('resiliencehub', region_name=region)
         apps = arh.list_apps()
-    except:
+    except EndpointConnectionError:
+        # Resilience Hub is not available in this region
+        continue
+    except ClientError as e:
+        print(f"Skipping {region}: {e}")
         continue
 
     # Get list of apps in a region
     app_arns = []
     for app in apps['appSummaries']:
         app_arns.append(app['appArn'])
-    while 'NextToken' in apps:
-        apps = arh.list_apps(NextToken = apps['NextToken'])
+    while apps.get('nextToken'):
+        apps = arh.list_apps(nextToken=apps['nextToken'])
         for app in apps['appSummaries']:
             app_arns.append(app['appArn'])
     
@@ -70,7 +80,7 @@ for region in regions:
         app_compliance = app_details['complianceStatus']
         
         # Get resiliency score from app details
-        app_res_score = int(app_details.get('resiliencyScore', 0) * 100)
+        app_res_score = to_points(app_details.get('resiliencyScore', 0))
         
         app_tier = 'unknown'
         
@@ -89,13 +99,17 @@ for region in regions:
                     writer.writerow([app_name, '', 'NotAssessed', '', '', '', '', '', app_compliance, app_res_score, '', '', '', '', '', app_tier, region])
             continue
         
-        app_last_assessed = app_details['lastAppComplianceEvaluationTime']
-        
+        # Not every app has been evaluated (e.g. apps with a missing policy)
+        app_last_assessed = app_details.get('lastAppComplianceEvaluationTime')
+        app_last_assessed = app_last_assessed.strftime("%Y-%m-%d %H:%M:%S") if app_last_assessed else ''
+
         # Get list of assessments for the application
-        assessment_summaries = arh.list_app_assessments(appArn=app)['assessmentSummaries']
-        
-        while 'NextToken' in assessment_summaries:
-            assessment_summaries.append(arh.list_app_assessments(appArn=app, NextToken = assessment_summaries['NextToken'])['assessmentSummaries'])
+        assessments = arh.list_app_assessments(appArn=app)
+        assessment_summaries = assessments['assessmentSummaries']
+
+        while assessments.get('nextToken'):
+            assessments = arh.list_app_assessments(appArn=app, nextToken=assessments['nextToken'])
+            assessment_summaries.extend(assessments['assessmentSummaries'])
         
         # Loop over list of assessments to get details
         for assessment in assessment_summaries:
@@ -159,8 +173,8 @@ for region in regions:
                 
                 # Format as "score/possibleScore" for each component
                 def format_score(component_data):
-                    score = int(component_data.get('score', 0) * 100)
-                    possible = int(component_data.get('possibleScore', 0) * 100)
+                    score = to_points(component_data.get('score', 0))
+                    possible = to_points(component_data.get('possibleScore', 0))
                     return f"{score}/{possible}"
                 
                 rto_rpo_compliance = format_score(component_scores.get('Compliance', {}))
@@ -171,5 +185,6 @@ for region in regions:
                 # Populate data into the CSV file    
                 with open(output_filename, 'a', newline='') as file:
                     writer = csv.writer(file)
-                    writer.writerow([app_name, assessment_name, assessment_compliance_status, end_time.strftime("%Y-%m-%d %H:%M:%S"), current_rto_readable, current_rpo_readable, target_rto_readable, target_rpo_readable, app_compliance, app_res_score, rto_rpo_compliance, alarms_score, sops_score, fis_score, app_last_assessed.strftime("%Y-%m-%d %H:%M:%S"), app_tier, region])
-                    
+                    writer.writerow([app_name, assessment_name, assessment_compliance_status, end_time.strftime("%Y-%m-%d %H:%M:%S"), current_rto_readable, current_rpo_readable, target_rto_readable, target_rpo_readable, app_compliance, app_res_score, rto_rpo_compliance, alarms_score, sops_score, fis_score, app_last_assessed, app_tier, region])
+
+print(f"Report written to {output_filename}")
