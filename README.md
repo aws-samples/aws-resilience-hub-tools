@@ -10,6 +10,7 @@ Collection of solutions and tools to customize and enhance your usage of [AWS Re
 * [github-actions-integration](./github-actions-integration) - Example of how Resilience Hub can be integrated into Github Actions for continuous resilience
 * [jenkins-pipeline-integration](./jenkins-pipeline-integration) - Example of how Resilience Hub can be integrated into Jenkins Pipeline for continuous resilience
 * [resilience-hub-csv-export](./resilience-hub-csv-export) - Export data from Resilience Hub for all applications in a CSV file that can be used for reporting and analytics
+* [resilience-hub-csv-export-detailed](./resilience-hub-csv-export-detailed) - Export detailed assessment results to a CSV file: csv-generator.py for AWS Resilience Hub (classic), and csv-generator-nextgen.py for next generation AWS Resilience Hub, with a colored Excel copy and an HTML report
 * [resilience-reporter](./resilience-reporter) - Creates an Amazon QuickSight dashboard that contains data from Resilience Hub for all applications
 * [resource-group-enhancer](./resource-group-enhancer) - Add resources not supported by AWS Resource Group to an application in Resilience Hub
 * [scheduled-assessment-role](./scheduled-assessment-role) - Creates an Identity and Access Management (IAM) role to be used by Resilience Hub for running scheduled (daily) assessments

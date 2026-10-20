@@ -1,0 +1,9 @@
+/* On paper: no navigation bars, and the desktop layout scaled to the page width */
+@media print {
+  #top-nav {
+    display: none;
+  }
+  body {
+    zoom: 0.7;
+  }
+}

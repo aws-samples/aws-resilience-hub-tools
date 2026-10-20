@@ -1,0 +1,21 @@
+{
+  "name": "csv-generator-ui",
+  "private": true,
+  "description": "RAP pre-check report page of csv-generator-nextgen.py, built with Cloudscape",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs ../csv-generator-nextgen.py"
+  },
+  "dependencies": {
+    "@cloudscape-design/collection-hooks": "1.0.110",
+    "@cloudscape-design/components": "3.0.1401",
+    "@cloudscape-design/design-tokens": "3.0.114",
+    "@cloudscape-design/global-styles": "1.0.71",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}
